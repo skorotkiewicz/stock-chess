@@ -86,6 +86,7 @@ const boardEl = document.getElementById('board');
 const statusBox = document.getElementById('statusBox');
 const historyBody = document.getElementById('historyBody');
 const historyContainer = document.getElementById('historyContainer');
+const branchControls = document.getElementById('branchControls');
 const branchSelect = document.getElementById('branchSelect');
 const branchStatus = document.getElementById('branchStatus');
 const btnBranchStart = document.getElementById('btnBranchStart');
@@ -225,6 +226,7 @@ function updateBranchControls() {
     branchSelect.appendChild(option);
   }
   branchSelect.value = branches.activeId;
+  branchControls.classList.toggle('hidden', branches.items.length === 1);
   branchStatus.textContent = branches.isReviewing
     ? `Reviewing ${branches.active.name} at ply ${branches.viewedPly}. Play a move to create a variation.`
     : '';
