@@ -146,7 +146,7 @@ export class BranchState {
         else if (i === startPly) out.push(`${number}... ${sans[i]}`);
         else out.push(sans[i]);
 
-        const kids = children.get(`${branch.id}:${i + 1}`);
+        const kids = children.get(`${branch.id}:${i}`);
         if (kids) {
           for (const kid of kids) {
             const variation: string[] = [];
@@ -234,7 +234,7 @@ export function parseVariationPgn(pgn: string): BranchState | null {
     if (!token) continue;
     const frame = stack[stack.length - 1];
     if (token === '(') {
-      stack.push({ line: { san: [], variations: [] }, atPly: frame.ply, ply: 0 });
+      stack.push({ line: { san: [], variations: [] }, atPly: Math.max(0, frame.ply - 1), ply: 0 });
     } else if (token === ')') {
       if (stack.length > 1) {
         const finished = stack.pop()!;

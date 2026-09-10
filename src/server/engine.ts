@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { Chess } from 'chess.js';
 
 const isExecutableFile = (candidate: string) => {
 	try {
@@ -9,6 +10,21 @@ const isExecutableFile = (candidate: string) => {
 		return false;
 	}
 };
+
+export function canonicalizeFen(rawFen: unknown): string {
+	if (typeof rawFen !== 'string' || !rawFen.trim()) {
+		throw new TypeError('Invalid or missing FEN string');
+	}
+	const trimmed = rawFen.trim();
+	if (/[\r\n]/.test(trimmed)) {
+		throw new Error('FEN must not contain newline characters');
+	}
+	try {
+		return new Chess(trimmed).fen();
+	} catch {
+		throw new Error('Invalid FEN notation');
+	}
+}
 
 // Set STOCKFISH_PATH when running from another working directory.
 const CANDIDATE_NAMES = [
@@ -28,6 +44,9 @@ const STOCKFISH_PATH =
 if (!isExecutableFile(STOCKFISH_PATH)) {
 	throw new Error(`Stockfish binary not found at: ${STOCKFISH_PATH}`);
 }
+
+const MAX_QUEUE_SIZE = 16;
+const DEFAULT_TASK_TIMEOUT_MS = 10000;
 
 // Difficulty settings map (5 discrete levels)
 const DIFFICULTY_LEVELS: Record<number, { skill: number; limitElo: number | null; depth: number; movetime: number }> = {
@@ -59,6 +78,8 @@ interface EngineTask {
 	movetime: number;
 	multipv: number;
 	lines: Map<number, EngineLine>;
+	signal?: AbortSignal;
+	timeoutTimer?: ReturnType<typeof setTimeout>;
 	error?: string;
 	resolve: (result: unknown) => void;
 	reject: (err: Error) => void;
@@ -83,8 +104,11 @@ class StockfishController {
 	destroying = false;
 	process: ReturnType<typeof spawn> | null = null;
 
-	constructor() {
-		this.startProcess();
+	ensureStarted() {
+		if (this.destroying) return;
+		if (!this.process || this.process.exitCode !== null || this.process.killed) {
+			this.startProcess();
+		}
 	}
 
 	startProcess() {
@@ -102,6 +126,7 @@ class StockfishController {
 			this.isReady = false;
 			if (this.currentTask) {
 				const task = this.currentTask;
+				if (task.timeoutTimer) clearTimeout(task.timeoutTimer);
 				this.currentTask = null;
 				this.busy = false;
 				task.reject(err);
@@ -112,11 +137,12 @@ class StockfishController {
 			console.log(`Stockfish process exited with code ${code}`);
 			if (this.currentTask) {
 				const task = this.currentTask;
+				if (task.timeoutTimer) clearTimeout(task.timeoutTimer);
 				this.currentTask = null;
 				this.busy = false;
 				task.reject(new Error(task.error || 'Stockfish process terminated unexpectedly'));
 			}
-			if (!this.destroying) {
+			if (!this.destroying && (this.queue.length > 0 || this.busy)) {
 				console.log('Restarting Stockfish process');
 				this.startProcess();
 				this.processNext();
@@ -179,6 +205,7 @@ class StockfishController {
 					const ponder = parts[3] || null;
 					const task = this.currentTask;
 
+					if (task.timeoutTimer) clearTimeout(task.timeoutTimer);
 					this.currentTask = null;
 					this.busy = false;
 
@@ -200,41 +227,92 @@ class StockfishController {
 	}
 
 	query(
-		fen: string,
-		options: { level?: number; depth?: number; movetime?: number; multipv?: number } = {},
+		rawFen: string,
+		options: { level?: number; depth?: number; movetime?: number; multipv?: number; signal?: AbortSignal } = {},
 	): Promise<EngineResult> {
-		const { level = 3, depth, movetime, multipv = 1 } = options;
+		const fen = canonicalizeFen(rawFen);
+		const { level = 3, depth, movetime, multipv = 1, signal } = options;
+
+		if (signal?.aborted) {
+			return Promise.reject(new DOMException('Request aborted', 'AbortError'));
+		}
+
+		if (this.queue.length >= MAX_QUEUE_SIZE) {
+			return Promise.reject(new Error('Engine queue is full'));
+		}
+
 		return new Promise((resolve, reject) => {
 			const config = DIFFICULTY_LEVELS[level] || DIFFICULTY_LEVELS[3];
 			const targetDepth = depth || config.depth;
 			const targetMovetime = movetime || config.movetime;
 
-			this.queue.push({
+			const task: EngineTask = {
 				fen,
 				config,
 				depth: targetDepth,
 				movetime: targetMovetime,
 				multipv,
 				lines: new Map(),
+				signal,
 				resolve: resolve as (result: unknown) => void,
 				reject,
-			});
+			};
 
+			if (signal) {
+				const onAbort = () => {
+					signal.removeEventListener('abort', onAbort);
+					const idx = this.queue.indexOf(task);
+					if (idx !== -1) {
+						this.queue.splice(idx, 1);
+						task.reject(new DOMException('Request aborted', 'AbortError'));
+					} else if (this.currentTask === task) {
+						this.send('stop');
+					}
+				};
+				signal.addEventListener('abort', onAbort, { once: true });
+			}
+
+			this.queue.push(task);
 			this.processNext();
 		});
 	}
 
-	evaluate(fen: string, { depth = 10, movetime = 300 }: { depth?: number; movetime?: number } = {}) {
-		return this.query(fen, { level: 3, depth, movetime, multipv: 3 });
+	evaluate(
+		fen: string,
+		options: { depth?: number; movetime?: number; signal?: AbortSignal } = {},
+	) {
+		const { depth = 10, movetime = 300, signal } = options;
+		return this.query(fen, { level: 3, depth, movetime, multipv: 3, signal });
 	}
 
 	processNext() {
 		if (this.busy || this.queue.length === 0) return;
 
+		this.ensureStarted();
+
+		while (this.queue.length > 0 && this.queue[0].signal?.aborted) {
+			const dropped = this.queue.shift()!;
+			dropped.reject(new DOMException('Request aborted', 'AbortError'));
+		}
+		if (this.queue.length === 0) return;
+
 		this.busy = true;
 		this.currentTask = this.queue.shift()!;
+		const task = this.currentTask;
 
-		const { fen, config, depth, movetime, multipv } = this.currentTask;
+		const timeoutMs = Math.max(DEFAULT_TASK_TIMEOUT_MS, task.movetime + 5000);
+		task.timeoutTimer = setTimeout(() => {
+			console.warn(`Engine task timed out after ${timeoutMs}ms`);
+			if (this.currentTask === task) {
+				this.send('stop');
+				this.currentTask = null;
+				this.busy = false;
+				task.reject(new Error('Engine task timed out'));
+				this.processNext();
+			}
+		}, timeoutMs);
+
+		const { fen, config, depth, movetime, multipv } = task;
 
 		this.send('stop');
 		this.send('setoption name UCI_ShowWDL value true');
@@ -253,9 +331,13 @@ class StockfishController {
 
 	destroy() {
 		this.destroying = true;
+		if (this.currentTask?.timeoutTimer) {
+			clearTimeout(this.currentTask.timeoutTimer);
+		}
 		if (this.process) {
 			this.send('quit');
 			this.process.kill();
+			this.process = null;
 		}
 	}
 }
