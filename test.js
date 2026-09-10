@@ -9,7 +9,9 @@ assert(existsSync('public/bundle.js'), 'public/bundle.js must exist');
 assert(statSync('public/bundle.js').size > 10000, 'public/bundle.js must not be empty');
 assert(existsSync('public/style.css'), 'public/style.css must exist');
 assert(statSync('public/style.css').size > 5000, 'public/style.css must not be empty');
-console.log('✓ Build artifacts verified');
+assert(existsSync('stockfish/stockfish-linux-x86-64-universal'), 'Stockfish binary must exist');
+assert(statSync('stockfish/stockfish-linux-x86-64-universal').size > 1000000, 'Stockfish binary must be valid');
+console.log('✓ Build artifacts and Stockfish binary verified');
 
 // 2. Start server on test port 3456
 const TEST_PORT = 3456;
