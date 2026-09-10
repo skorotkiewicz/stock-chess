@@ -55,19 +55,47 @@ try {
   assert.strictEqual(healthData.engine, 'Stockfish 19', 'Engine should be Stockfish 19');
   console.log('✓ Stockfish 19 health check passed');
 
-  // 5. Test Stockfish Move generation
+  // 5. Test Stockfish Move generation for White (Level 1) and Black (Level 5)
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  const moveRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+  const moveRes1 = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: startFen, level: 1 }),
   });
-  assert.strictEqual(moveRes.status, 200, 'Move API should return 200');
-  const moveData = await moveRes.json();
-  assert(typeof moveData.bestmove === 'string' && moveData.bestmove.length >= 4, 'bestmove should be UCI notation');
-  console.log(`✓ Stockfish 19 move generation passed (bestmove: ${moveData.bestmove})`);
+  assert.strictEqual(moveRes1.status, 200, 'Move API should return 200');
+  const moveData1 = await moveRes1.json();
+  assert(typeof moveData1.bestmove === 'string' && moveData1.bestmove.length >= 4, 'bestmove should be UCI notation');
+  console.log(`✓ Stockfish 19 White (Lv 1) move passed: ${moveData1.bestmove}`);
 
-  // 6. Test Stockfish Eval
+  const blackTurnFen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
+  const moveRes2 = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: blackTurnFen, level: 5 }),
+  });
+  assert.strictEqual(moveRes2.status, 200, 'Move API should return 200');
+  const moveData2 = await moveRes2.json();
+  assert(typeof moveData2.bestmove === 'string' && moveData2.bestmove.length >= 4, 'bestmove should be UCI notation');
+  console.log(`✓ Stockfish 19 Black (Lv 5) move passed: ${moveData2.bestmove}`);
+
+  // 6. Test FEN and PGN parsing
+  const { Chess } = await import('chess.js');
+  const testChess = new Chess();
+  testChess.move('e4');
+  testChess.move('e5');
+  const exportedPgn = testChess.pgn();
+  const exportedFen = testChess.fen();
+
+  const importedPgnChess = new Chess();
+  importedPgnChess.loadPgn(exportedPgn);
+  assert.strictEqual(importedPgnChess.history().length, 2, 'PGN import should reconstruct move history');
+
+  const importedFenChess = new Chess();
+  importedFenChess.load(exportedFen);
+  assert.strictEqual(importedFenChess.fen(), exportedFen, 'FEN import should match exported FEN');
+  console.log('✓ PGN and FEN import/export logic verified');
+
+  // 7. Test Stockfish Eval
   const evalRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/eval`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
