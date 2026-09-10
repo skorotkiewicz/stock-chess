@@ -3,7 +3,7 @@
 A web chess game built with Lichess [Chessground](https://github.com/lichess-org/chessground) and native [Stockfish 19](https://github.com/official-stockfish/Stockfish) UCI engine.
 
 <p align="center">
-  <img src="screenshot.png" alt="Stockfish 19 Chess Screenshot" width="80%">
+  <img src="screenshot-editor.png" alt="Stockfish 19 Chess Screenshot" width="80%">
 </p>
 
 ## Quick Start
