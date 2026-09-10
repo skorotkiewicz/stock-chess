@@ -160,10 +160,14 @@
           <button id="btnQuickExportFen">Export FEN</button>
           <button id="btnEval">Update Eval</button>
         </div>
+        <label class="analysis-toggle" for="toggleAnalysis">
+          <input type="checkbox" id="toggleAnalysis">
+          Show engine analysis
+        </label>
       </div>
 
       <!-- Engine Analysis Panel -->
-      <div class="panel" id="analysisPanel">
+      <div class="panel hidden" id="analysisPanel">
         <div class="panel-title">Engine Analysis</div>
         <div class="analysis-empty" id="analysisEmpty" aria-live="polite">Analyzing position...</div>
         <div class="hidden" id="analysisContent">

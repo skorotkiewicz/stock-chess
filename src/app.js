@@ -85,6 +85,8 @@ const boardEl = document.getElementById('board');
 const statusBox = document.getElementById('statusBox');
 const historyBody = document.getElementById('historyBody');
 const historyContainer = document.getElementById('historyContainer');
+const analysisPanel = document.getElementById('analysisPanel');
+const toggleAnalysis = document.getElementById('toggleAnalysis');
 const analysisEmpty = document.getElementById('analysisEmpty');
 const analysisContent = document.getElementById('analysisContent');
 const analysisEval = document.getElementById('analysisEval');
@@ -947,6 +949,9 @@ function init() {
   });
   btnUndo.addEventListener('click', undoMove);
   btnEval.addEventListener('click', requestEvalOnly);
+  toggleAnalysis.addEventListener('change', () => {
+    analysisPanel.classList.toggle('hidden', !toggleAnalysis.checked);
+  });
   btnEditBoard.addEventListener('click', toggleEditMode);
   btnEditorDone.addEventListener('click', toggleEditMode);
   btnEditorClear.addEventListener('click', () => ground.set({ fen: '8/8/8/8/8/8/8/8' }));
