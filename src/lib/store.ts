@@ -4,7 +4,7 @@ import type { Key } from 'chessground/types';
 import { Chess } from 'chess.js';
 import { buildEditorFen } from './editor-position';
 import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './analysis';
-import { BranchState } from './branches';
+import { BranchState, parseVariationPgn } from './branches';
 
 export interface HistoryCell {
   ply: number;
@@ -990,7 +990,30 @@ export class ChessStore {
       success = true;
     } catch {}
 
-    // Try PGN format
+    // Try PGN format with variations
+    if (!success) {
+      const parsed = parseVariationPgn(trimmed);
+      if (parsed) {
+        this.cancelEngineMove();
+        this.branches = parsed;
+        this.rebuildChess();
+        this.editMode = false;
+        this.selectedPiece = null;
+        this.resetAnalysis();
+        this.updateBoard();
+        this.emit();
+        this.requestEvalOnly();
+
+        this.ioFeedback = { text: 'Game successfully loaded!', error: false };
+        setTimeout(() => {
+          this.closeIo();
+          this.checkEngineTurn();
+        }, 600);
+        return;
+      }
+    }
+
+    // Fall back to chess.js plain-PGN parsing
     if (!success) {
       try {
         candidate.loadPgn(trimmed);

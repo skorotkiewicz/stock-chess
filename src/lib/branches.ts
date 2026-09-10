@@ -167,3 +167,111 @@ export class BranchState {
     return `${headerLines.join('\n')}\n\n${body.join(' ') || '*'}`;
   }
 }
+
+interface ParsedLine {
+  san: string[];
+  variations: { atPly: number; line: ParsedLine }[];
+}
+
+function replayUcis(rootFen: string, sans: string[], prefix: string[] = []): string[] {
+  const game = new Chess(rootFen);
+  for (const uci of prefix) {
+    try {
+      game.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.slice(4, 5) || undefined });
+    } catch {
+      break;
+    }
+  }
+  const ucis: string[] = [];
+  for (const san of sans) {
+    try {
+      const move = game.move(san);
+      if (!move) break;
+      ucis.push(`${move.from}${move.to}${move.promotion || ''}`);
+    } catch {
+      break;
+    }
+  }
+  return ucis;
+}
+
+// Parses a PGN with (possibly nested) variations into a BranchState.
+// Returns null when the input has no movetext or no legal moves.
+export function parseVariationPgn(pgn: string): BranchState | null {
+  const headers: Record<string, string> = {};
+  let movetext = pgn.replace(/\[\s*(\w+)\s+"((?:[^"\\]|\\.)*)"\s*\]/g, (_match, key: string, value: string) => {
+    headers[key] = value.replace(/\\"/g, '"');
+    return ' ';
+  });
+  movetext = movetext
+    .replace(/\{[^}]*\}/g, ' ')
+    .replace(/;[^\n]*/g, ' ')
+    .replace(/\$\d+/g, ' ')
+    .replace(/\(/g, ' ( ')
+    .replace(/\)/g, ' ) ')
+    .trim();
+  if (!movetext) return null;
+
+  let rootFen: string;
+  try {
+    rootFen = headers.FEN ? new Chess(headers.FEN).fen() : new Chess().fen();
+  } catch {
+    rootFen = new Chess().fen();
+  }
+
+  const root: ParsedLine = { san: [], variations: [] };
+  const stack: { line: ParsedLine; atPly: number; ply: number }[] = [{ line: root, atPly: 0, ply: 0 }];
+
+  for (const token of movetext.split(/\s+/)) {
+    if (!token) continue;
+    const frame = stack[stack.length - 1];
+    if (token === '(') {
+      stack.push({ line: { san: [], variations: [] }, atPly: frame.ply, ply: 0 });
+    } else if (token === ')') {
+      if (stack.length > 1) {
+        const finished = stack.pop()!;
+        stack[stack.length - 1].line.variations.push({ atPly: finished.atPly, line: finished.line });
+      }
+    } else if (token === '*' || /^(1-0|0-1|1\/2-1\/2)$/.test(token)) {
+      // Game result — ignore.
+    } else {
+      const san = token.replace(/^\d+\.+/, '').replace(/[?!]+$/, '');
+      if (/[a-zA-Z]/.test(san)) {
+        frame.line.san.push(san);
+        frame.ply += 1;
+      }
+    }
+  }
+
+  if (!root.san.length && !root.variations.length) return null;
+  const mainUcis = replayUcis(rootFen, root.san);
+  if (!mainUcis.length && !root.variations.length) return null;
+
+  const bs = new BranchState(rootFen, mainUcis, headers);
+  bs.items[0].moves = mainUcis;
+  bs.viewedPly = mainUcis.length;
+
+  const addVariation = (parentId: string, atPly: number, line: ParsedLine) => {
+    const source = bs.items.find((branch) => branch.id === parentId)!;
+    const ucis = replayUcis(rootFen, line.san, source.moves.slice(0, atPly));
+    // Same normalization as append: a fork inside a variation's shared
+    // prefix belongs to the ancestor line that owns those moves.
+    let attach = source;
+    while (attach.parentId !== null && atPly <= attach.forkPly) {
+      attach = bs.items.find((branch) => branch.id === attach.parentId)!;
+    }
+    const number = bs.nextVariation++;
+    bs.items.push({
+      id: `variation-${number}`,
+      name: `Variation ${number}`,
+      parentId: attach.id,
+      forkPly: atPly,
+      moves: [...attach.moves.slice(0, atPly), ...ucis],
+      analysis: new Map(),
+    });
+    for (const sub of line.variations) addVariation(`variation-${number}`, atPly + sub.atPly, sub.line);
+  };
+
+  for (const variation of root.variations) addVariation('main', variation.atPly, variation.line);
+  return bs;
+}
