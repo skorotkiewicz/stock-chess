@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild';
-import { mkdirSync, existsSync, copyFileSync, createWriteStream, chmodSync, unlinkSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync, readFileSync, writeFileSync, createWriteStream, chmodSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -51,6 +51,13 @@ if (!existsSync('public')) {
   mkdirSync('public', { recursive: true });
 }
 copyFileSync('src/index.html', 'public/index.html');
+// Cache-bust asset URLs so browsers never reuse a stale bundle
+const cacheBust = Date.now();
+let indexHtml = readFileSync('public/index.html', 'utf8');
+indexHtml = indexHtml
+  .replace('/style.css', `/style.css?v=${cacheBust}`)
+  .replace('/bundle.js', `/bundle.js?v=${cacheBust}`);
+writeFileSync('public/index.html', indexHtml);
 
 // 3. Build JS bundle
 await esbuild.build({

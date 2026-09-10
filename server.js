@@ -261,7 +261,7 @@ const server = http.createServer(async (req, res) => {
     if (existsSync(filePath) && statSync(filePath).isFile()) {
       const ext = extname(filePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': contentType });
+      res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
       createReadStream(filePath).pipe(res);
       return;
     }

@@ -12,8 +12,8 @@ let editMode = false;
 let selectedPiece = null;
 
 const PIECE_SYMBOLS = {
-  'w k': '♔', 'w q': '♕', 'w r': '♖', 'w b': '♗', 'w n': '♘', 'w p': '♙',
-  'b k': '♚', 'b q': '♛', 'b r': '♜', 'b b': '♝', 'b n': '♞', 'b p': '♟',
+  'w king': '♔', 'w queen': '♕', 'w rook': '♖', 'w bishop': '♗', 'w knight': '♘', 'w pawn': '♙',
+  'b king': '♚', 'b queen': '♛', 'b rook': '♜', 'b bishop': '♝', 'b knight': '♞', 'b pawn': '♟',
 };
 
 // Sound synthesizer using Web Audio API
@@ -518,7 +518,7 @@ function undoMove() {
 // Board Editor
 function buildEditorPalette() {
   editorPalette.innerHTML = '';
-  const roles = ['k', 'q', 'r', 'b', 'n', 'p'];
+  const roles = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
   for (const color of ['white', 'black']) {
     for (const role of roles) {
       const btn = document.createElement('button');
@@ -539,9 +539,19 @@ function buildEditorPalette() {
   }
 }
 
-function onSquareSelect(key) {
+function onBoardPlace(e) {
   if (!editMode || !selectedPiece) return;
-  ground.setPieces(new Map([[key, { ...selectedPiece, promoted: false }]]));
+  const isTouch = e.type === 'touchstart';
+  if (!isTouch && e.button !== 0) return;
+  const pos = isTouch
+    ? (e.touches && e.touches[0] ? [e.touches[0].clientX, e.touches[0].clientY] : null)
+    : [e.clientX, e.clientY];
+  if (!pos) return;
+  const key = ground.getKeyAtDomPos(pos);
+  if (!key) return;
+  e.preventDefault();
+  e.stopPropagation();
+  ground.setPieces(new Map([[key, { color: selectedPiece.color, role: selectedPiece.role }]]));
 }
 
 function enterEditMode() {
@@ -763,10 +773,11 @@ function init() {
     },
     premovable: { enabled: false },
     drawable: { enabled: true },
-    events: {
-      select: onSquareSelect,
-    },
   });
+
+  // Palette piece placement: intercept mousedown/touchstart in capture phase
+  boardEl.addEventListener('mousedown', onBoardPlace, true);
+  boardEl.addEventListener('touchstart', onBoardPlace, true);
 
   // Player type switches
   whiteTypeSelect.addEventListener('change', () => {
