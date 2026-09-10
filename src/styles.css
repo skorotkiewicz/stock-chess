@@ -417,6 +417,12 @@ button.primary:hover {
 .analysis-empty {
   color: var(--text-muted);
   font-size: 0.8rem;
+  /* Keep the panel height stable while "Analyzing..." swaps to results. */
+  min-height: 11rem;
+}
+
+.analysis-content {
+  min-height: 11rem;
 }
 
 .analysis-primary {

@@ -64,8 +64,14 @@ export function App() @{
   }, []);
 
   useEffect(() => {
-    const container = historyRef.current as HTMLDivElement | null;
-    container?.querySelector('.move-ply.active')?.scrollIntoView({ block: 'nearest' });
+    const container = historyRef.current;
+    const active = container?.querySelector('.move-ply.active');
+    if (!container || !active) return;
+    // Scroll only the history box; scrollIntoView also scrolls the page.
+    const boxTop = container.getBoundingClientRect().top;
+    const rowTop = active.getBoundingClientRect().top;
+    const rowHeight = active.getBoundingClientRect().height;
+    container.scrollTop += rowTop - boxTop - (container.clientHeight - rowHeight) / 2;
   }, [ui$.get().rows]);
 
   const ui = ui$.get();
@@ -307,7 +313,7 @@ export function App() @{
                 {ui.analysis.message}
               </div>
             ) : (
-              <div>
+              <div class="analysis-content">
                 <div class="analysis-primary">
                   <span class="analysis-eval">{ui.analysis.evalText}</span>
                   <span class="analysis-wdl">{ui.analysis.wdlText}</span>
