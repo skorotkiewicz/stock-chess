@@ -493,6 +493,10 @@ button.primary:hover {
   margin-bottom: 0.5rem;
 }
 
+#editorPanel .modal-help {
+  margin-bottom: 0.75rem;
+}
+
 .editor-piece-btn {
   font-size: 1.4rem;
   padding: 0.25rem 0;
