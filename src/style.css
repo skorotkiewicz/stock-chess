@@ -486,6 +486,24 @@ button.primary:hover {
   gap: 0.5rem;
 }
 
+.editor-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.editor-piece-btn {
+  font-size: 1.4rem;
+  padding: 0.25rem 0;
+  line-height: 1.2;
+}
+
+.editor-piece-btn.active {
+  border-color: #4ade80;
+  background-color: rgba(21, 128, 61, 0.25);
+}
+
 @media (max-width: 900px) {
   .main-container {
     flex-direction: column;

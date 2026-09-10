@@ -8,6 +8,13 @@ let isEngineThinking = false;
 let isMatchPaused = false;
 let pendingPromotion = null;
 let engineTimer = null;
+let editMode = false;
+let selectedPiece = null;
+
+const PIECE_SYMBOLS = {
+  'w k': '♔', 'w q': '♕', 'w r': '♖', 'w b': '♗', 'w n': '♘', 'w p': '♙',
+  'b k': '♚', 'b q': '♛', 'b r': '♜', 'b b': '♝', 'b n': '♞', 'b p': '♟',
+};
 
 // Sound synthesizer using Web Audio API
 class ChessAudio {
@@ -97,6 +104,12 @@ const btnPauseResume = document.getElementById('btnPauseResume');
 const btnFlip = document.getElementById('btnFlip');
 const btnUndo = document.getElementById('btnUndo');
 const btnEval = document.getElementById('btnEval');
+const btnEditBoard = document.getElementById('btnEditBoard');
+const editorPanel = document.getElementById('editorPanel');
+const editorPalette = document.getElementById('editorPalette');
+const btnEditorDone = document.getElementById('btnEditorDone');
+const btnEditorClear = document.getElementById('btnEditorClear');
+const btnEditorStart = document.getElementById('btnEditorStart');
 
 // Promotion
 const promotionOverlay = document.getElementById('promotionOverlay');
@@ -186,6 +199,10 @@ function updateEvalBar(score, currentTurn) {
 
 // Update board state in Chessground
 function updateBoard() {
+  if (editMode) {
+    updatePlayerLabels();
+    return;
+  }
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
   const config = getPlayerConfig(currentTurn);
   const isHumanTurn = config.type === 'human' && !isEngineThinking && !isMatchPaused && !chess.isGameOver();
@@ -301,7 +318,7 @@ function updateMoveHistory() {
 
 // Check if engine should move and trigger if appropriate
 function checkEngineTurn() {
-  if (isEngineThinking || isMatchPaused || chess.isGameOver()) return;
+  if (editMode || isEngineThinking || isMatchPaused || chess.isGameOver()) return;
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
   const config = getPlayerConfig(currentTurn);
 
@@ -469,7 +486,7 @@ async function requestEvalOnly() {
 
 // Undo move (takes back 2 plies when human vs engine, 1 ply otherwise)
 function undoMove() {
-  if (isEngineThinking) return;
+  if (isEngineThinking || editMode) return;
   if (engineTimer) clearTimeout(engineTimer);
 
   const history = chess.history();
@@ -498,9 +515,98 @@ function undoMove() {
   checkEngineTurn();
 }
 
+// Board Editor
+function buildEditorPalette() {
+  editorPalette.innerHTML = '';
+  const roles = ['k', 'q', 'r', 'b', 'n', 'p'];
+  for (const color of ['white', 'black']) {
+    for (const role of roles) {
+      const btn = document.createElement('button');
+      btn.className = 'editor-piece-btn';
+      btn.textContent = PIECE_SYMBOLS[`${color === 'white' ? 'w' : 'b'} ${role}`];
+      btn.title = `${color} ${role}`;
+      btn.dataset.color = color;
+      btn.dataset.role = role;
+      btn.addEventListener('click', () => {
+        selectedPiece = selectedPiece && selectedPiece.role === role && selectedPiece.color === color
+          ? null
+          : { color, role };
+        editorPalette.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+        if (selectedPiece) btn.classList.add('active');
+      });
+      editorPalette.appendChild(btn);
+    }
+  }
+}
+
+function onSquareSelect(key) {
+  if (!editMode || !selectedPiece) return;
+  ground.setPieces(new Map([[key, { ...selectedPiece, promoted: false }]]));
+}
+
+function enterEditMode() {
+  if (engineTimer) clearTimeout(engineTimer);
+  editMode = true;
+  selectedPiece = null;
+  editorPanel.classList.remove('hidden');
+  btnEditBoard.textContent = 'Done Editing';
+  ground.set({
+    lastMove: undefined,
+    check: false,
+    movable: { free: true, color: 'both' },
+    draggable: { enabled: true, deleteOnDropOff: true },
+    animation: { enabled: false },
+  });
+  updatePlayerLabels();
+  statusBox.className = 'status-box';
+  statusBox.textContent = 'Board editor active';
+}
+
+function exitEditMode() {
+  const placement = ground.getFen();
+  const candidates = ['w KQkq - 0 1', 'w - - 0 1', 'b KQkq - 0 1', 'b - - 0 1'];
+  let loaded = false;
+
+  for (const suffix of candidates) {
+    try {
+      chess.load(`${placement} ${suffix}`);
+      loaded = true;
+      break;
+    } catch {}
+  }
+
+  if (!loaded) {
+    statusBox.className = 'status-box gameover';
+    statusBox.textContent = 'Invalid position: each side needs exactly one king.';
+    return;
+  }
+
+  editMode = false;
+  selectedPiece = null;
+  editorPanel.classList.add('hidden');
+  btnEditBoard.textContent = 'Edit Board';
+  updateBoard();
+  updateMoveHistory();
+  updateGameStatus();
+  requestEvalOnly();
+}
+
+function toggleEditMode() {
+  if (editMode) {
+    exitEditMode();
+  } else {
+    if (engineTimer) clearTimeout(engineTimer);
+    enterEditMode();
+  }
+}
+
 // Start a new game
 function startNewGame() {
   if (engineTimer) clearTimeout(engineTimer);
+  editMode = false;
+  selectedPiece = null;
+  editorPanel.classList.add('hidden');
+  btnEditBoard.textContent = 'Edit Board';
   isEngineThinking = false;
   isMatchPaused = false;
   btnPauseResume.textContent = 'Pause Match';
@@ -657,6 +763,9 @@ function init() {
     },
     premovable: { enabled: false },
     drawable: { enabled: true },
+    events: {
+      select: onSquareSelect,
+    },
   });
 
   // Player type switches
@@ -687,6 +796,11 @@ function init() {
   });
   btnUndo.addEventListener('click', undoMove);
   btnEval.addEventListener('click', requestEvalOnly);
+  btnEditBoard.addEventListener('click', toggleEditMode);
+  btnEditorDone.addEventListener('click', toggleEditMode);
+  btnEditorClear.addEventListener('click', () => ground.set({ fen: '8/8/8/8/8/8/8/8' }));
+  btnEditorStart.addEventListener('click', () => ground.set({ fen: 'start' }));
+  buildEditorPalette();
 
   // Modal & I/O
   btnOpenIoModal.addEventListener('click', openIoModal);

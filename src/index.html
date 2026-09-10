@@ -135,8 +135,20 @@
           <button id="btnPauseResume">Pause Match</button>
           <button id="btnFlip">Flip Board</button>
           <button id="btnUndo">Takeback</button>
+          <button id="btnEditBoard">Edit Board</button>
         </div>
       </div>
+
+      <!-- Board Editor Panel -->
+      <div class="panel hidden" id="editorPanel">
+        <div class="panel-title">Board Editor</div>
+        <div class="editor-palette" id="editorPalette"></div>
+        <p class="modal-help">Pick a piece, then click a square to place it. Drag pieces off the board to remove them.</p>
+        <div class="btn-group">
+          <button class="primary" id="btnEditorDone">Done</button>
+          <button id="btnEditorClear">Clear Board</button>
+          <button id="btnEditorStart">Start Position</button>
+        </div>
 
       <!-- Import / Export & Analysis Panel -->
       <div class="panel">
