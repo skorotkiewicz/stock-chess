@@ -490,16 +490,17 @@ async function requestEngineMove(level) {
 
 // Request position evaluation only
 async function requestEvalOnly() {
-  if (isEngineThinking) return;
+  if (isEngineThinking || editMode) return;
+  const fen = chess.fen();
   try {
     const res = await fetch('/api/stockfish/eval', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fen: chess.fen() }),
+      body: JSON.stringify({ fen }),
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.eval) {
+      if (data.eval && !editMode && fen === chess.fen()) {
         updateEvalBar(data.eval, chess.turn());
       }
     }
@@ -582,6 +583,8 @@ function enterEditMode() {
   cancelEngineMove();
   editMode = true;
   selectedPiece = null;
+  pendingPromotion = null;
+  promotionOverlay.classList.add('hidden');
   editorPalette.querySelectorAll('button').forEach((btn) => btn.classList.remove('active'));
   editorPanel.classList.remove('hidden');
   btnEditBoard.textContent = 'Done Editing';
@@ -672,15 +675,12 @@ function startNewGame() {
 // Toggle Pause / Resume
 function togglePauseResume() {
   isMatchPaused = !isMatchPaused;
+  if (isMatchPaused) cancelEngineMove();
   btnPauseResume.textContent = isMatchPaused ? 'Resume Match' : 'Pause Match';
   updateBoard();
   updateGameStatus();
 
-  if (!isMatchPaused) {
-    checkEngineTurn();
-  } else if (engineTimer) {
-    clearTimeout(engineTimer);
-  }
+  if (!isMatchPaused) checkEngineTurn();
 }
 
 // Import / Export Functions
@@ -756,6 +756,10 @@ function loadGameString(input) {
 
   cancelEngineMove();
   chess = candidate;
+  editMode = false;
+  selectedPiece = null;
+  editorPanel.classList.add('hidden');
+  btnEditBoard.textContent = 'Edit Board';
 
   updateBoard();
   updateMoveHistory();
@@ -800,6 +804,7 @@ function init() {
   whiteTypeSelect.addEventListener('change', () => {
     const isEngine = whiteTypeSelect.value === 'stockfish';
     whiteLevelGroup.classList.toggle('hidden', !isEngine);
+    cancelEngineMove();
     updateBoard();
     checkEngineTurn();
   });
@@ -807,6 +812,7 @@ function init() {
   blackTypeSelect.addEventListener('change', () => {
     const isEngine = blackTypeSelect.value === 'stockfish';
     blackLevelGroup.classList.toggle('hidden', !isEngine);
+    cancelEngineMove();
     updateBoard();
     checkEngineTurn();
   });
