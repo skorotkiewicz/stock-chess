@@ -1,10 +1,12 @@
 import * as esbuild from 'esbuild';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 if (!existsSync('public')) {
   mkdirSync('public', { recursive: true });
 }
+
+copyFileSync('src/index.html', 'public/index.html');
 
 await esbuild.build({
   entryPoints: ['src/app.js'],

@@ -8,6 +8,12 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const STOCKFISH_PATH = resolve(__dirname, 'stockfish/stockfish-linux-x86-64-universal');
 
+// Ensure frontend assets are built
+if (!existsSync(join(__dirname, 'public/bundle.js')) || !existsSync(join(__dirname, 'public/index.html'))) {
+  const { execSync } = await import('node:child_process');
+  execSync('node build.js', { stdio: 'inherit' });
+}
+
 // Verify Stockfish binary exists
 if (!existsSync(STOCKFISH_PATH)) {
   console.error(`Stockfish binary not found at: ${STOCKFISH_PATH}`);
