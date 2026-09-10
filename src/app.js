@@ -1,5 +1,6 @@
 import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
+import { buildEditorFen } from './editor-position.js';
 
 // Game state
 let chess = new Chess();
@@ -8,6 +9,7 @@ let isEngineThinking = false;
 let isMatchPaused = false;
 let pendingPromotion = null;
 let engineTimer = null;
+let engineAbortController = null;
 let editMode = false;
 let selectedPiece = null;
 
@@ -211,7 +213,11 @@ function updateBoard() {
     fen: chess.fen(),
     turnColor: currentTurn,
     check: chess.inCheck(),
+    autoCastle: true,
+    animation: { enabled: true },
+    draggable: { enabled: true, deleteOnDropOff: false },
     movable: {
+      free: false,
       color: isHumanTurn ? currentTurn : undefined,
       dests: isHumanTurn ? getLegalDests(chess) : new Map(),
     },
@@ -317,6 +323,14 @@ function updateMoveHistory() {
 }
 
 // Check if engine should move and trigger if appropriate
+function cancelEngineMove() {
+  if (engineTimer) clearTimeout(engineTimer);
+  engineTimer = null;
+  if (engineAbortController) engineAbortController.abort();
+  engineAbortController = null;
+  isEngineThinking = false;
+}
+
 function checkEngineTurn() {
   if (editMode || isEngineThinking || isMatchPaused || chess.isGameOver()) return;
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
@@ -332,6 +346,7 @@ function checkEngineTurn() {
     // Engine vs Engine has a comfortable pacing delay to watch moves
     const delay = isEngineVsEngine ? 650 : 150;
     engineTimer = setTimeout(() => {
+      engineTimer = null;
       requestEngineMove(config.level);
     }, delay);
   }
@@ -402,6 +417,8 @@ function onUserMove(orig, dest) {
 // Request Stockfish move from backend API
 async function requestEngineMove(level) {
   if (isEngineThinking || isMatchPaused || chess.isGameOver()) return;
+  const controller = new AbortController();
+  engineAbortController = controller;
   isEngineThinking = true;
   updatePlayerLabels();
   updateGameStatus();
@@ -413,6 +430,7 @@ async function requestEngineMove(level) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fen, level }),
+      signal: controller.signal,
     });
 
     if (!res.ok) {
@@ -420,7 +438,11 @@ async function requestEngineMove(level) {
     }
 
     const data = await res.json();
+    if (controller !== engineAbortController) return;
+    engineAbortController = null;
     isEngineThinking = false;
+
+    if (editMode || fen !== chess.fen()) return;
 
     if (!data.bestmove || data.bestmove === '(none)') {
       updateBoard();
@@ -457,8 +479,10 @@ async function requestEngineMove(level) {
 
     checkEngineTurn();
   } catch (err) {
-    console.error('Stockfish request failed:', err);
+    if (controller !== engineAbortController) return;
+    engineAbortController = null;
     isEngineThinking = false;
+    if (err.name !== 'AbortError') console.error('Stockfish request failed:', err);
     updateBoard();
     updateGameStatus();
   }
@@ -555,14 +579,16 @@ function onBoardPlace(e) {
 }
 
 function enterEditMode() {
-  if (engineTimer) clearTimeout(engineTimer);
+  cancelEngineMove();
   editMode = true;
   selectedPiece = null;
+  editorPalette.querySelectorAll('button').forEach((btn) => btn.classList.remove('active'));
   editorPanel.classList.remove('hidden');
   btnEditBoard.textContent = 'Done Editing';
   ground.set({
     lastMove: undefined,
     check: false,
+    autoCastle: false,
     movable: { free: true, color: 'both' },
     draggable: { enabled: true, deleteOnDropOff: true },
     animation: { enabled: false },
@@ -573,21 +599,13 @@ function enterEditMode() {
 }
 
 function exitEditMode() {
-  const placement = ground.getFen();
-  const candidates = ['w KQkq - 0 1', 'w - - 0 1', 'b KQkq - 0 1', 'b - - 0 1'];
-  let loaded = false;
+  const existingCastling = chess.fen().split(' ')[2];
 
-  for (const suffix of candidates) {
-    try {
-      chess.load(`${placement} ${suffix}`);
-      loaded = true;
-      break;
-    } catch {}
-  }
-
-  if (!loaded) {
+  try {
+    chess.load(buildEditorFen(ground.getFen(), chess.turn(), existingCastling, ground.state.pieces));
+  } catch (err) {
     statusBox.className = 'status-box gameover';
-    statusBox.textContent = 'Invalid position: each side needs exactly one king.';
+    statusBox.textContent = `Invalid position: ${err.message.replace(/^Invalid FEN:\s*/, '')}.`;
     return;
   }
 
@@ -599,20 +617,20 @@ function exitEditMode() {
   updateMoveHistory();
   updateGameStatus();
   requestEvalOnly();
+  checkEngineTurn();
 }
 
 function toggleEditMode() {
   if (editMode) {
     exitEditMode();
   } else {
-    if (engineTimer) clearTimeout(engineTimer);
     enterEditMode();
   }
 }
 
 // Start a new game
 function startNewGame() {
-  if (engineTimer) clearTimeout(engineTimer);
+  cancelEngineMove();
   editMode = false;
   selectedPiece = null;
   editorPanel.classList.add('hidden');
@@ -736,9 +754,8 @@ function loadGameString(input) {
     return;
   }
 
-  if (engineTimer) clearTimeout(engineTimer);
+  cancelEngineMove();
   chess = candidate;
-  isEngineThinking = false;
 
   updateBoard();
   updateMoveHistory();

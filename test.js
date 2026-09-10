@@ -1,8 +1,36 @@
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
+import { buildEditorFen } from './src/editor-position.js';
 
 console.log('--- Running Chess App Verification Tests ---');
+
+const homePieces = new Map([
+  ['e1', { color: 'white', role: 'king' }],
+  ['a1', { color: 'white', role: 'rook' }],
+  ['h1', { color: 'white', role: 'rook' }],
+  ['e8', { color: 'black', role: 'king' }],
+  ['a8', { color: 'black', role: 'rook' }],
+  ['h8', { color: 'black', role: 'rook' }],
+]);
+const placement = 'r3k2r/8/8/8/8/8/8/R3K2R';
+assert.strictEqual(
+  buildEditorFen(placement, 'b', 'KQkq', homePieces),
+  `${placement} b KQkq - 0 1`,
+  'Editor should preserve side to move and supported castling rights',
+);
+assert.strictEqual(
+  buildEditorFen(placement, 'w', '-', homePieces),
+  `${placement} w - - 0 1`,
+  'Editor should not invent lost castling rights',
+);
+homePieces.delete('h1');
+assert.strictEqual(
+  buildEditorFen(placement, 'w', 'KQkq', homePieces),
+  `${placement} w Qkq - 0 1`,
+  'Editor should remove castling rights without the required rook',
+);
+console.log('✓ Board editor FEN metadata verified');
 
 // 1. Verify build artifacts
 assert(existsSync('public/bundle.js'), 'public/bundle.js must exist');
