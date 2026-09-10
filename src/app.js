@@ -2,9 +2,11 @@ import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
 import { buildEditorFen } from './editor-position.js';
 import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './analysis.js';
+import { BranchState } from './branches.js';
 
 // Game state
 let chess = new Chess();
+let branches = new BranchState(chess.fen());
 let ground = null;
 let isEngineThinking = false;
 let isMatchPaused = false;
@@ -14,7 +16,6 @@ let engineAbortController = null;
 let editMode = false;
 let selectedPiece = null;
 let analysisGeneration = 0;
-const positionAnalyses = new Map();
 
 const PIECE_SYMBOLS = {
   'w king': '♔', 'w queen': '♕', 'w rook': '♖', 'w bishop': '♗', 'w knight': '♘', 'w pawn': '♙',
@@ -85,6 +86,9 @@ const boardEl = document.getElementById('board');
 const statusBox = document.getElementById('statusBox');
 const historyBody = document.getElementById('historyBody');
 const historyContainer = document.getElementById('historyContainer');
+const branchSelect = document.getElementById('branchSelect');
+const branchStatus = document.getElementById('branchStatus');
+const btnBranchStart = document.getElementById('btnBranchStart');
 const toggleHistoryAnalysis = document.getElementById('toggleHistoryAnalysis');
 const analysisPanel = document.getElementById('analysisPanel');
 const toggleAnalysis = document.getElementById('toggleAnalysis');
@@ -174,6 +178,55 @@ function getLegalDests(chessInstance) {
   return dests;
 }
 
+function moveToUci(move) {
+  return `${move.from}${move.to}${move.promotion || ''}`;
+}
+
+function buildBranchChess(ply = branches.viewedPly) {
+  const game = new Chess(branches.rootFen);
+  for (const [key, value] of Object.entries(branches.headers)) game.setHeader(key, value);
+  for (const uci of branches.active.moves.slice(0, ply)) {
+    game.move({
+      from: uci.slice(0, 2),
+      to: uci.slice(2, 4),
+      promotion: uci.slice(4, 5) || undefined,
+    });
+  }
+  return game;
+}
+
+function rebuildChess() {
+  chess = buildBranchChess();
+}
+
+function resetBranchesFromGame(game) {
+  const headers = game.getHeaders();
+  const moves = game.history({ verbose: true }).map(moveToUci);
+  while (game.undo()) {}
+  branches = new BranchState(game.fen(), moves, headers);
+  rebuildChess();
+  updateBranchControls();
+}
+
+function currentAnalyses() {
+  return branches.active.analysis;
+}
+
+function updateBranchControls() {
+  branchSelect.innerHTML = '';
+  for (const branch of branches.items) {
+    const option = document.createElement('option');
+    option.value = branch.id;
+    option.textContent = branch.name;
+    branchSelect.appendChild(option);
+  }
+  branchSelect.value = branches.activeId;
+  branchStatus.textContent = branches.isReviewing
+    ? `Reviewing ${branches.active.name} at ply ${branches.viewedPly}. Play a move to create a variation.`
+    : '';
+  branchStatus.classList.toggle('hidden', !branches.isReviewing);
+}
+
 // Convert score object to White's perspective percentage
 function scoreToWhitePercent(score, currentTurn) {
   if (!score) return 50;
@@ -215,7 +268,7 @@ function setAnalysisMessage(message) {
 
 function resetAnalysis(message = 'Analyzing position...') {
   analysisGeneration += 1;
-  positionAnalyses.clear();
+  currentAnalyses().clear();
   setAnalysisMessage(message);
 }
 
@@ -255,7 +308,7 @@ function renderAnalysis(data, fen) {
 }
 
 function storePositionAnalysis(ply, data, fen, showCurrent = false) {
-  positionAnalyses.set(ply, { data, fen });
+  currentAnalyses().set(ply, { data, fen });
   if (showCurrent) renderAnalysis(data, fen);
   updateMoveHistory();
 }
@@ -268,7 +321,8 @@ function updateBoard() {
   }
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
   const config = getPlayerConfig(currentTurn);
-  const isHumanTurn = config.type === 'human' && !isEngineThinking && !isMatchPaused && !chess.isGameOver();
+  const isHumanTurn = (branches.isReviewing || config.type === 'human') &&
+    !isEngineThinking && !isMatchPaused && !chess.isGameOver();
 
   ground.set({
     fen: chess.fen(),
@@ -313,6 +367,7 @@ function updatePlayerLabels() {
   bottomIndicator.className = `player-indicator ${bottomColor}`;
 
   function getStatusText(color) {
+    if (branches.isReviewing) return currentTurn === color ? 'Choose move' : 'Reviewing';
     if (chess.isGameOver()) return 'Finished';
     if (isMatchPaused) return 'Paused';
     if (currentTurn !== color) return 'Waiting';
@@ -330,7 +385,9 @@ function updatePlayerLabels() {
 // Update game status box
 function updateGameStatus() {
   statusBox.className = 'status-box';
-  if (chess.isCheckmate()) {
+  if (branches.isReviewing) {
+    statusBox.textContent = `Reviewing ${branches.active.name}. Play a move to create a variation.`;
+  } else if (chess.isCheckmate()) {
     const winner = chess.turn() === 'w' ? 'Black' : 'White';
     statusBox.textContent = `Checkmate! ${winner} wins.`;
     statusBox.classList.add('gameover');
@@ -365,22 +422,25 @@ function updateGameStatus() {
 
 // Render move history
 function updateMoveHistory() {
-  const history = chess.history({ verbose: true });
+  const history = buildBranchChess(branches.active.moves.length).history({ verbose: true });
   historyBody.innerHTML = '';
 
   function moveCell(move, ply) {
     const td = document.createElement('td');
-    td.className = `move-ply ${ply === history.length - 1 ? 'active' : ''}`;
+    td.className = `move-ply ${ply === branches.viewedPly - 1 ? 'active' : ''} ${ply >= branches.viewedPly ? 'future' : ''}`;
     if (!move) return td;
 
-    const entry = document.createElement('div');
+    const entry = document.createElement('button');
     const san = document.createElement('span');
     const meta = document.createElement('span');
-    const after = positionAnalyses.get(ply + 1)?.data;
-    const before = positionAnalyses.get(ply)?.data;
+    const after = currentAnalyses().get(ply + 1)?.data;
+    const before = currentAnalyses().get(ply)?.data;
     const playedMove = `${move.from}${move.to}${move.promotion || ''}`;
     const quality = classifyMove(before, after, playedMove);
-    entry.className = 'move-entry';
+    entry.type = 'button';
+    entry.className = 'move-entry history-move';
+    entry.title = `View position after ${move.san}`;
+    entry.addEventListener('click', () => navigateToPly(ply + 1));
     meta.className = 'move-meta';
     san.textContent = move.san;
 
@@ -410,7 +470,45 @@ function updateMoveHistory() {
     tr.append(moveNum, moveCell(history[i], i), moveCell(history[i + 1], i + 1));
     historyBody.appendChild(tr);
   }
-  historyContainer.scrollTop = historyContainer.scrollHeight;
+  historyBody.querySelector('.move-ply.active')?.scrollIntoView({ block: 'nearest' });
+}
+
+function showBranchPosition() {
+  analysisGeneration += 1;
+  rebuildChess();
+  pendingPromotion = null;
+  promotionOverlay.classList.add('hidden');
+  updateBranchControls();
+
+  const moves = chess.history({ verbose: true });
+  const lastMove = moves.at(-1);
+  ground.set({ lastMove: lastMove ? [lastMove.from, lastMove.to] : undefined });
+
+  const cached = currentAnalyses().get(branches.viewedPly);
+  if (cached) {
+    updateEvalBar(cached.data.eval, cached.data.turn);
+    renderAnalysis(cached.data, cached.fen);
+  } else {
+    setAnalysisMessage('Analyzing position...');
+  }
+
+  updateBoard();
+  updateMoveHistory();
+  updateGameStatus();
+  if (!cached) requestEvalOnly();
+  checkEngineTurn();
+}
+
+function navigateToPly(ply) {
+  cancelEngineMove();
+  branches.view(ply);
+  showBranchPosition();
+}
+
+function selectBranch(id) {
+  cancelEngineMove();
+  branches.select(id);
+  showBranchPosition();
 }
 
 // Check if engine should move and trigger if appropriate
@@ -423,7 +521,7 @@ function cancelEngineMove() {
 }
 
 function checkEngineTurn() {
-  if (editMode || isEngineThinking || isMatchPaused || chess.isGameOver()) return;
+  if (editMode || branches.isReviewing || isEngineThinking || isMatchPaused || chess.isGameOver()) return;
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
   const config = getPlayerConfig(currentTurn);
 
@@ -459,6 +557,12 @@ promotionChoices.addEventListener('click', (e) => {
   executeMove(orig, dest, choice);
 });
 
+function recordBranchMove(move) {
+  const result = branches.append(moveToUci(move));
+  if (result.created) analysisGeneration += 1;
+  updateBranchControls();
+}
+
 // Execute a move in the game
 function executeMove(orig, dest, promotion) {
   try {
@@ -467,6 +571,8 @@ function executeMove(orig, dest, promotion) {
       updateBoard();
       return;
     }
+
+    recordBranchMove(move);
 
     if (chess.inCheck()) {
       audio.play('check');
@@ -560,6 +666,7 @@ async function requestEngineMove(level) {
 
     const move = chess.move({ from: orig, to: dest, promotion });
     if (move) {
+      recordBranchMove(move);
       if (chess.inCheck()) {
         audio.play('check');
       } else if (move.captured) {
@@ -614,41 +721,20 @@ async function requestEvalOnly() {
 
 // Undo move (takes back 2 plies when human vs engine, 1 ply otherwise)
 function undoMove() {
-  if (isEngineThinking || editMode) return;
-  if (engineTimer) clearTimeout(engineTimer);
+  if (isEngineThinking || editMode || branches.viewedPly === 0) return;
+  cancelEngineMove();
 
-  const history = chess.history();
-  if (history.length === 0) return;
-
-  const whiteConfig = getPlayerConfig('white');
-  const blackConfig = getPlayerConfig('black');
-  const isHumanVsEngine = (whiteConfig.type === 'human' && blackConfig.type === 'stockfish') ||
-                          (whiteConfig.type === 'stockfish' && blackConfig.type === 'human');
-
-  if (isHumanVsEngine && history.length >= 2) {
-    chess.undo();
-    chess.undo();
+  if (branches.isReviewing) {
+    branches.view(branches.viewedPly - 1);
   } else {
-    chess.undo();
+    const whiteConfig = getPlayerConfig('white');
+    const blackConfig = getPlayerConfig('black');
+    const isHumanVsEngine = (whiteConfig.type === 'human' && blackConfig.type === 'stockfish') ||
+                            (whiteConfig.type === 'stockfish' && blackConfig.type === 'human');
+    branches.takeback(isHumanVsEngine && branches.viewedPly >= 2 ? 2 : 1);
   }
 
-  ground.set({
-    lastMove: undefined,
-  });
-
-  analysisGeneration += 1;
-  for (const ply of positionAnalyses.keys()) {
-    if (ply > chess.history().length) positionAnalyses.delete(ply);
-  }
-  const currentAnalysis = positionAnalyses.get(chess.history().length);
-  if (currentAnalysis) renderAnalysis(currentAnalysis.data, currentAnalysis.fen);
-  else setAnalysisMessage('Analyzing position...');
-
-  updateBoard();
-  updateMoveHistory();
-  updateGameStatus();
-  requestEvalOnly();
-  checkEngineTurn();
+  showBranchPosition();
 }
 
 // Board Editor
@@ -728,6 +814,8 @@ function exitEditMode() {
   selectedPiece = null;
   editorPanel.classList.add('hidden');
   btnEditBoard.textContent = 'Edit Board';
+  branches = new BranchState(chess.fen());
+  updateBranchControls();
   resetAnalysis();
   updateBoard();
   updateMoveHistory();
@@ -756,6 +844,8 @@ function startNewGame() {
   btnPauseResume.textContent = 'Pause Match';
 
   chess.reset();
+  branches = new BranchState(chess.fen());
+  updateBranchControls();
   resetAnalysis();
 
   // If White is engine and Black is human, orient board for Black
@@ -869,7 +959,7 @@ function loadGameString(input) {
   }
 
   cancelEngineMove();
-  chess = candidate;
+  resetBranchesFromGame(candidate);
   editMode = false;
   selectedPiece = null;
   resetAnalysis();
@@ -941,11 +1031,13 @@ function init() {
   btnFlip.addEventListener('click', () => {
     ground.toggleOrientation();
     updatePlayerLabels();
-    const currentAnalysis = positionAnalyses.get(chess.history().length)?.data;
+    const currentAnalysis = currentAnalyses().get(chess.history().length)?.data;
     updateEvalBar(currentAnalysis?.eval || { type: 'cp', value: 0 }, currentAnalysis?.turn || chess.turn());
   });
   btnUndo.addEventListener('click', undoMove);
   btnEval.addEventListener('click', requestEvalOnly);
+  branchSelect.addEventListener('change', () => selectBranch(branchSelect.value));
+  btnBranchStart.addEventListener('click', () => navigateToPly(0));
   toggleAnalysis.addEventListener('change', () => {
     analysisPanel.classList.toggle('hidden', !toggleAnalysis.checked);
   });
@@ -984,6 +1076,7 @@ function init() {
   });
 
   // Initial state
+  updateBranchControls();
   updatePlayerLabels();
   updateGameStatus();
   requestEvalOnly();

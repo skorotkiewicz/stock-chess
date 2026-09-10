@@ -305,6 +305,29 @@ button.primary:hover {
   background-color: var(--color-green-hover);
 }
 
+.branch-controls {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.branch-controls label,
+.branch-status {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.branch-controls select {
+  min-width: 0;
+}
+
+.branch-status {
+  margin-bottom: 0.5rem;
+  color: #fbbf24;
+}
+
 .history-container {
   height: 200px;
   overflow-y: auto;
@@ -331,7 +354,6 @@ button.primary:hover {
 
 .history-table td.move-ply {
   width: 37.5%;
-  cursor: default;
 }
 
 .history-table td.move-ply.active {
@@ -343,6 +365,24 @@ button.primary:hover {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
+}
+
+.history-move {
+  width: 100%;
+  padding: 0.15rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+
+.history-move:hover,
+.history-move:focus-visible {
+  background-color: var(--bg-hover);
+}
+
+.move-ply.future .history-move {
+  opacity: 0.5;
 }
 
 .move-meta {

@@ -191,6 +191,14 @@
       <!-- Move History Panel -->
       <div class="panel">
         <div class="panel-title">Move History</div>
+        <div class="branch-controls">
+          <label for="branchSelect">Branch</label>
+          <select id="branchSelect" aria-label="Active branch">
+            <option value="main">Main</option>
+          </select>
+          <button id="btnBranchStart">Start</button>
+        </div>
+        <div class="branch-status hidden" id="branchStatus"></div>
         <div class="history-container" id="historyContainer">
           <table class="history-table">
             <tbody id="historyBody"></tbody>

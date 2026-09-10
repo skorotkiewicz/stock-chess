@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { buildEditorFen } from './src/editor-position.js';
 import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './src/analysis.js';
+import { BranchState } from './src/branches.js';
 
 console.log('--- Running Chess App Verification Tests ---');
 
@@ -56,6 +57,27 @@ const afterMistake = {
 assert.strictEqual(classifyMove(beforeMove, afterMistake, 'd2d4'), 'Best');
 assert.strictEqual(classifyMove(beforeMove, afterMistake, 'e2e4'), 'Mistake');
 console.log('✓ Analysis formatting and move classification verified');
+
+const branches = new BranchState('start', ['e2e4', 'e7e5']);
+branches.active.analysis.set(1, 'cached');
+branches.view(1);
+const variation = branches.append('c7c5');
+assert.strictEqual(variation.created, true, 'Moving from history should create a branch');
+assert.strictEqual(branches.active.name, 'Variation 1');
+assert.deepStrictEqual(branches.active.moves, ['e2e4', 'c7c5']);
+assert.strictEqual(branches.active.analysis.get(1), 'cached', 'A branch should retain prefix analysis');
+branches.select('main');
+assert.deepStrictEqual(branches.active.moves, ['e2e4', 'e7e5'], 'Main branch should remain unchanged');
+assert.strictEqual(branches.viewedPly, 2, 'Selecting a branch should jump to its tip');
+branches.select(variation.branch.id);
+assert.strictEqual(branches.viewedPly, 2, 'Selecting a variation should jump to its tip');
+branches.active.analysis.set(2, 'discarded');
+branches.takeback(1);
+assert.deepStrictEqual(branches.active.moves, ['e2e4'], 'Takeback should affect only the active branch');
+assert.strictEqual(branches.active.analysis.has(2), false, 'Takeback should discard later analysis');
+branches.select('main');
+assert.deepStrictEqual(branches.active.moves, ['e2e4', 'e7e5'], 'Takeback should preserve sibling branches');
+console.log('✓ Move history branch creation and switching verified');
 
 // 1. Verify build artifacts
 assert(existsSync('public/bundle.js'), 'public/bundle.js must exist');
