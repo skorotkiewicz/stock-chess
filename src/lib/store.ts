@@ -379,8 +379,9 @@ export class ChessStore {
     this.chess = this.buildBranchChess();
   }
 
+  // Full variation-tree PGN (main line + parenthesized variations).
   activeBranchPgn() {
-    return this.buildBranchChess(this.branches.active.moves.length).pgn();
+    return this.branches.toPgn();
   }
 
   resetBranchesFromGame(game: Chess) {
