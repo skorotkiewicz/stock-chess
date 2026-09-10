@@ -7,6 +7,14 @@ export function formatAnalysisScore(score, turn) {
   return `${value > 0 ? '+' : ''}${(value / 100).toFixed(2)}`;
 }
 
+export function formatWhiteWdl(wdl, turn) {
+  if (!wdl) return 'White W/D/L: unavailable';
+  const white = turn === 'w'
+    ? wdl
+    : { win: wdl.loss, draw: wdl.draw, loss: wdl.win };
+  return `White W/D/L: ${(white.win / 10).toFixed(1)}% / ${(white.draw / 10).toFixed(1)}% / ${(white.loss / 10).toFixed(1)}%`;
+}
+
 export function uciLineToSan(fen, moves = []) {
   const position = new Chess(fen);
   const san = [];

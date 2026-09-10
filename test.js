@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { buildEditorFen } from './src/editor-position.js';
-import { classifyMove, formatAnalysisScore, uciLineToSan } from './src/analysis.js';
+import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './src/analysis.js';
 
 console.log('--- Running Chess App Verification Tests ---');
 
@@ -35,6 +35,11 @@ console.log('✓ Board editor FEN metadata verified');
 
 assert.strictEqual(formatAnalysisScore({ type: 'cp', value: 28 }, 'b'), '-0.28');
 assert.strictEqual(formatAnalysisScore({ type: 'mate', value: -3 }, 'b'), '+M3');
+assert.strictEqual(formatWhiteWdl(null, 'b'), 'White W/D/L: unavailable');
+assert.strictEqual(
+  formatWhiteWdl({ win: 100, draw: 400, loss: 500 }, 'b'),
+  'White W/D/L: 50.0% / 40.0% / 10.0%',
+);
 assert.deepStrictEqual(
   uciLineToSan('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', ['g1f3', 'b8c6']),
   ['Nf3', 'Nc6'],

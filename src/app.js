@@ -1,7 +1,7 @@
 import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
 import { buildEditorFen } from './editor-position.js';
-import { classifyMove, formatAnalysisScore, uciLineToSan } from './analysis.js';
+import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './analysis.js';
 
 // Game state
 let chess = new Chess();
@@ -225,14 +225,10 @@ function renderAnalysis(data, fen) {
     return;
   }
 
-  const wdl = analysis.wdl;
-  const whiteWdl = data.turn === 'w'
-    ? wdl
-    : { win: wdl.loss, draw: wdl.draw, loss: wdl.win };
   const bestLine = uciLineToSan(fen, [data.bestmove, data.ponder].filter(Boolean));
 
   analysisEval.textContent = formatAnalysisScore(analysis.score, data.turn);
-  analysisWdl.textContent = `White W/D/L: ${(whiteWdl.win / 10).toFixed(1)}% / ${(whiteWdl.draw / 10).toFixed(1)}% / ${(whiteWdl.loss / 10).toFixed(1)}%`;
+  analysisWdl.textContent = formatWhiteWdl(analysis.wdl, data.turn);
   analysisStats.textContent = `Depth ${analysis.depth}/${analysis.seldepth} · ${analysis.nodes.toLocaleString()} nodes · ${analysis.nps.toLocaleString()} NPS · Hash ${(analysis.hashfull / 10).toFixed(1)}% · ${analysis.time} ms · TB ${analysis.tbhits}`;
   analysisBest.textContent = bestLine[0] || data.bestmove || 'None';
   analysisPonder.textContent = bestLine[1] || data.ponder || 'None';
