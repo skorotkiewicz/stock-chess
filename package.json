@@ -1,0 +1,24 @@
+{
+  "name": "my-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsrx-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@octanejs/vite-plugin": "^0.1.54",
+    "chess.js": "^1.4.0",
+    "chessground": "^9.2.1",
+    "octane": "^0.2.7"
+  },
+  "devDependencies": {
+    "@tsrx/prettier-plugin": "^0.3.136",
+    "@tsrx/typescript-plugin": "^0.3.136",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0"
+  }
+}
