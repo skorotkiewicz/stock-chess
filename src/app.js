@@ -199,6 +199,10 @@ function rebuildChess() {
   chess = buildBranchChess();
 }
 
+function activeBranchPgn() {
+  return buildBranchChess(branches.active.moves.length).pgn();
+}
+
 function resetBranchesFromGame(game) {
   const headers = game.getHeaders();
   const moves = game.history({ verbose: true }).map(moveToUci);
@@ -427,8 +431,10 @@ function updateMoveHistory() {
 
   function moveCell(move, ply) {
     const td = document.createElement('td');
-    td.className = `move-ply ${ply === branches.viewedPly - 1 ? 'active' : ''} ${ply >= branches.viewedPly ? 'future' : ''}`;
+    td.className = 'move-ply';
     if (!move) return td;
+    td.classList.toggle('active', ply === branches.viewedPly - 1);
+    td.classList.toggle('future', ply >= branches.viewedPly);
 
     const entry = document.createElement('button');
     const san = document.createElement('span');
@@ -894,7 +900,7 @@ function showFeedback(text, isError = false) {
 }
 
 function openIoModal() {
-  ioTextarea.value = chess.pgn() || chess.fen();
+  ioTextarea.value = activeBranchPgn() || chess.fen();
   ioFeedback.textContent = '';
   ioModalOverlay.classList.remove('hidden');
 }
@@ -916,7 +922,7 @@ function copyToClipboard(text, successMsg) {
 }
 
 function downloadPgnFile() {
-  const pgnContent = chess.pgn();
+  const pgnContent = activeBranchPgn();
   const blob = new Blob([pgnContent || chess.fen()], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1059,7 +1065,7 @@ function init() {
 
   btnDoImport.addEventListener('click', () => loadGameString(ioTextarea.value));
   btnCopyFen.addEventListener('click', () => copyToClipboard(chess.fen(), 'FEN copied to clipboard!'));
-  btnCopyPgn.addEventListener('click', () => copyToClipboard(chess.pgn() || chess.fen(), 'PGN copied to clipboard!'));
+  btnCopyPgn.addEventListener('click', () => copyToClipboard(activeBranchPgn() || chess.fen(), 'PGN copied to clipboard!'));
   btnDownloadPgn.addEventListener('click', downloadPgnFile);
 
   // Quick export buttons in sidebar
@@ -1070,7 +1076,7 @@ function init() {
   });
 
   btnQuickExportPgn.addEventListener('click', () => {
-    navigator.clipboard.writeText(chess.pgn() || chess.fen());
+    navigator.clipboard.writeText(activeBranchPgn() || chess.fen());
     statusBox.textContent = 'PGN copied to clipboard!';
     setTimeout(updateGameStatus, 1500);
   });

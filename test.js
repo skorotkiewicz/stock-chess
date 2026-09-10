@@ -113,6 +113,7 @@ try {
   const htmlText = await htmlRes.text();
   assert(htmlText.includes('Stockfish 19 Chess'), 'Index HTML should contain title');
   assert(htmlText.includes('id="analysisPanel"'), 'Index HTML should contain analysis panel');
+  assert(htmlText.includes('id="branchSelect"'), 'Index HTML should contain branch selector');
   console.log('✓ Static HTML served correctly');
 
   const jsRes = await fetch(`http://localhost:${TEST_PORT}/bundle.js`);
