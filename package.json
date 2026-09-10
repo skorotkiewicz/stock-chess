@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node build.js",
     "start": "node server.js",
-    "test": "node test.js"
+    "test": "node test.js",
+    "download:stockfish": "FORCE_STOCKFISH_DOWNLOAD=1 node build.js"
   },
   "dependencies": {
     "chess.js": "^1.4.0",
