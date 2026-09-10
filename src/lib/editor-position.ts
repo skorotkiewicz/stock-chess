@@ -5,10 +5,15 @@ const CASTLING_PIECES = [
   ['q', 'black', 'e8', 'a8'],
 ];
 
-export function buildEditorFen(placement, turn, existingCastling, pieces) {
-  const hasPiece = (key, color, role) => {
+export function buildEditorFen(
+  placement: string,
+  turn: string,
+  existingCastling: string,
+  pieces: Map<string, { color: string; role: string }>,
+) {
+  const hasPiece = (key: string, color: string, role: string) => {
     const piece = pieces.get(key);
-    return piece && piece.color === color && piece.role === role;
+    return !!piece && piece.color === color && piece.role === role;
   };
   const castling = CASTLING_PIECES
     .filter(([right, color, king, rook]) => existingCastling.includes(right) &&

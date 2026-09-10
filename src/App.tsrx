@@ -1,123 +1,376 @@
-import { Layout } from "./Layout.tsrx";
+import { useEffect, useMemo, useRef } from 'octane';
+import { useSignal$ } from 'octane/signals/client';
+import type { HistoryCell } from './lib/store';
+import { ChessStore, PIECE_SYMBOLS, initialSnapshot } from './lib/store';
 
-const LINKS = [
-  {
-    href: "https://octanejs.dev/docs/quick-start",
-    title: "Quick start",
-    body: "Scaffold an app, mount a component, and the .tsrx essentials.",
-  },
-  {
-    href: "https://octanejs.dev/docs/core-apis",
-    title: "Core APIs",
-    body: "State, events, context, effects, async UI, and server rendering.",
-  },
-  {
-    href: "https://octanejs.dev/docs/tsrx-vs-tsx",
-    title: "TSRX vs TSX",
-    body: "What the .tsrx dialect adds on top of ordinary JSX.",
-  },
-  {
-    href: "https://octanejs.dev/docs/differences-from-react",
-    title: "Differences from React",
-    body: "The deliberate divergences. Everything else matching is the point.",
-  },
+const PROMOTIONS = [
+  { piece: 'q', symbol: '♕', title: 'Queen' },
+  { piece: 'r', symbol: '♖', title: 'Rook' },
+  { piece: 'b', symbol: '♗', title: 'Bishop' },
+  { piece: 'n', symbol: '♘', title: 'Knight' },
 ];
 
-export function App() @{
-  <Layout>
-    <section class="hero">
-      <svg class="mark" viewBox="0 0 84 108" fill="none" aria-hidden="true">
-        <path
-          d="M71.0265 37.6009L65.8601 32.48C57.4266 24.1187 52.5193 13.6179 49.6691 1.55156C49.1892 -0.480713 46.2849 -0.534311 45.796 1.49572C43.135 12.5571 39.0884 21.441 31.9122 28.5539L29.1656 31.2763L32.1217 32.6051C34.5258 33.686 36.646 34.9098 38.604 36.3458C40.1609 37.487 41.4587 38.751 42.5898 40.0798L46.9068 35.8031L59.8758 48.6555C67.025 55.7439 67.025 67.2742 59.8758 74.3626L47.0622 87.0609C43.5969 90.4957 38.9915 92.385 34.0932 92.385C29.1949 92.385 24.5895 90.4935 21.1242 87.0609C13.975 79.9726 13.975 68.4422 21.1242 61.3539L26.4529 56.0722C27.6921 53.5084 29.6118 50.1138 31.1844 45.7858C32.4101 42.4136 31.8266 38.8649 29.4653 36.0733L27.1198 33.3041L9.97348 50.2992C-3.32449 63.4822 -3.32449 84.9304 9.97348 98.1133C16.6225 104.706 25.3578 108 34.0932 108C42.8286 108 51.564 104.704 58.213 98.1133L71.0265 85.415C84.3245 72.2321 84.3245 50.7838 71.0265 37.5986V37.6009Z"
-          fill="currentColor"
-        />
-        <path
-          d="M53.682 51.4605C56.0095 56.1079 55.4237 66.6802 46.9654 65.3715C45.0232 65.07 43.2928 64.0941 42.7183 61.8943C42.3578 60.5097 43.3131 58.2697 43.7705 56.9387C46.481 49.0441 43.0923 42.4136 37.2657 38.1413C35.5736 36.9019 33.6314 35.7384 31.1913 34.6396C34.0595 38.0274 34.8684 42.3801 33.2732 46.6277C32.3224 48.9481 31.0606 51.3958 29.9543 53.6514C27.9671 57.7047 26.3178 62.504 27.575 69.1591C28.1879 72.4063 30.2743 75.0706 32.2503 76.9532C26.4259 77.6522 24.1886 73.811 23.0305 72.1986C21.7935 70.4767 20.9328 66.0973 22.7173 62.935C16.4491 69.1502 16.4491 79.2669 22.7173 85.4843C25.759 88.4969 29.7989 90.154 34.0933 90.154C38.3878 90.154 42.4276 88.4969 45.4694 85.4843L56.6562 74.3984C63.0663 67.8527 61.0543 58.7722 53.6798 51.4628L53.682 51.4605Z"
-          fill="#FF415A"
-        />
-      </svg>
-      <h1 class="title">octane</h1>
-      <p class="lede">
-        React’s programming model, compiled. Edit src/App.tsrx and save — the page
-        updates without a reload.
-      </p>
-      <ul class="links">
-        @for (const link of LINKS; key link.href) {
-          <li>
-            <a class="link" href={link.href} target="_blank" rel="noreferrer">
-              <span class="link-title">{link.title as string}</span>
-              <span class="link-body">{link.body as string}</span>
-            </a>
-          </li>
-        }
-      </ul>
-    </section>
+const PALETTE = ['white', 'black'].flatMap((color) =>
+  ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'].map((role) => ({
+    color: color as 'white' | 'black',
+    role,
+    key: `${color}-${role}`,
+    symbol: PIECE_SYMBOLS[`${color === 'white' ? 'w' : 'b'} ${role}`],
+    title: `${color} ${role}`,
+  })),
+);
 
-    <style>
-      .hero {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 1.25rem;
-        text-align: center;
-      }
-      .mark {
-        width: 5rem;
-        height: auto;
-      }
-      .title {
-        margin: 0;
-        font-size: 3rem;
-        line-height: 1.1;
-        letter-spacing: -0.03em;
-      }
-      .lede {
-        max-width: 34rem;
-        margin: 0;
-        color: var(--text-secondary);
-        font-size: 1.25rem;
-      }
-      .links {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-        gap: 0.75rem;
-        width: 100%;
-        max-width: 42rem;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-      .link {
-        display: block;
-        padding: 1rem;
-        border: 1px solid var(--border);
-        border-radius: 0.9rem;
-        background: var(--surface-subtle);
-        color: var(--text);
-        text-align: left;
-        text-decoration: none;
-        transition:
-          background 0.15s,
-          border-color 0.15s,
-          transform 0.15s;
-      }
-      .link:hover {
-        border-color: var(--card-hover-border);
-        background: var(--card-hover-bg);
-        transform: translateY(-1px);
-      }
-      .link-title {
-        display: block;
-        font-size: 0.95rem;
-        font-weight: 600;
-      }
-      .link-body {
-        display: block;
-        margin-top: 0.15rem;
-        color: var(--text-secondary);
-        font-size: 0.82rem;
-        line-height: 1.4;
-      }
-    </style>
-  </Layout>
+const LEVELS = [
+  { value: 1, label: 'Lv 1 (1320)' },
+  { value: 2, label: 'Lv 2 (1600)' },
+  { value: 3, label: 'Lv 3 (1900)' },
+  { value: 4, label: 'Lv 4 (2300)' },
+  { value: 5, label: 'Lv 5 (Max)' },
+];
+
+function MoveCell({ cell, onSelect }: { cell: HistoryCell | null; onSelect: (ply: number) => void }) @{
+  if (!cell) {
+    <td class="move-ply" />
+    return;
+  }
+  <td class={['move-ply', cell.active ? 'active' : null, cell.future ? 'future' : null]}>
+      <button
+        class="move-entry history-move"
+        title={`View position after ${cell.san}`}
+        onClick={() => onSelect(cell.ply + 1)}
+      >
+        <span>{cell.san}</span>
+        {(cell.evalText || cell.quality) && (
+          <span class="move-meta">
+            {cell.evalText && <span>{cell.evalText}</span>}
+            {cell.quality && (
+              <span class={['move-quality', cell.quality.toLowerCase()]}>{cell.quality}</span>
+            )}
+          </span>
+        )}
+      </button>
+    </td>
+}
+
+export function App() @{
+  const ui$ = useSignal$(initialSnapshot());
+  const store = useMemo(() => new ChessStore((snapshot) => ui$.set(snapshot)), []);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (boardRef.current) store.attachBoard(boardRef.current);
+  }, []);
+
+  useEffect(() => {
+    historyRef.current?.querySelector('.move-ply.active')?.scrollIntoView({ block: 'nearest' });
+  }, [ui$.get().rows]);
+
+  const ui = ui$.get();
+
+  <div class="app">
+    <header>
+      <div class="brand">
+        <h1>Stockfish 19 Chess</h1>
+        <span class="badge">Stockfish 19 UCI Ready</span>
+      </div>
+    </header>
+
+    <main class="main-container">
+      <div class="game-area">
+        <div class="eval-container" title="Position Evaluation">
+          <div class="eval-score top">{ui.evalText}</div>
+          <div class="eval-black" style={`height: ${ui.evalBlackPct}%`} />
+          <div class="eval-white" />
+          <div class="eval-score bottom">{ui.evalText}</div>
+        </div>
+
+        <div class="board-container">
+          <div class="player-info">
+            <div class="player-name">
+              <span class={['player-indicator', ui.topColor]} />
+              <span>{ui.topName}</span>
+            </div>
+            <div class="engine-status">{ui.topStatus}</div>
+          </div>
+
+          <div class="board-wrapper">
+            <div id="board" ref={boardRef} />
+
+            {ui.promotion && (
+              <div class="promotion-overlay">
+                <div class="promotion-dialog">
+                  <h3>Choose promotion piece</h3>
+                  <div class="promotion-choices">
+                    @for (const p of PROMOTIONS; key p.piece) {
+                      <button class="promotion-choice" title={p.title} onClick={() => store.choosePromotion(p.piece)}>
+                        {p.symbol}
+                      </button>
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {ui.ioOpen && (
+              <div
+                class="modal-overlay"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) store.closeIo();
+                }}
+              >
+                <div class="modal-dialog">
+                  <div class="modal-header">
+                    <h3>Import / Export Game</h3>
+                    <button class="btn-close" onClick={() => store.closeIo()}>
+                      ×
+                    </button>
+                  </div>
+                  <p class="modal-help">
+                    Paste a FEN position or PGN notation to import, or copy current game notation.
+                  </p>
+                  <textarea
+                    rows={6}
+                    value={ui.ioText}
+                    onInput={(e) => store.setIoText(e.currentTarget.value)}
+                    placeholder="Paste FEN or PGN here..."
+                  />
+                  {ui.ioFeedback && (
+                    <div class={['modal-feedback', ui.ioFeedback.error ? 'error' : 'success']}>
+                      {ui.ioFeedback.text}
+                    </div>
+                  )}
+                  <div class="modal-actions">
+                    <button class="primary" onClick={() => store.loadGameString(ui.ioText)}>
+                      Load Game
+                    </button>
+                    <button onClick={() => store.copyFen()}>Copy FEN</button>
+                    <button onClick={() => store.copyPgn()}>Copy PGN</button>
+                    <button onClick={() => store.downloadPgn()}>Download PGN</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div class="player-info">
+            <div class="player-name">
+              <span class={['player-indicator', ui.bottomColor]} />
+              <span>{ui.bottomName}</span>
+            </div>
+            <div class="engine-status">{ui.bottomStatus}</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-title">Players Setup</div>
+
+          <div class="player-setup-row">
+            <div class="form-group flex-1">
+              <label for="whiteTypeSelect">White</label>
+              <select
+                id="whiteTypeSelect"
+                value={ui.whiteType}
+                onChange={(e) => store.setWhiteType(e.currentTarget.value as 'human' | 'stockfish')}
+              >
+                <option value="human">Human</option>
+                <option value="stockfish">Stockfish 19</option>
+              </select>
+            </div>
+            {ui.whiteType === 'stockfish' && (
+              <div class="form-group flex-1">
+                <label for="whiteLevelSelect">White Level</label>
+                <select
+                  id="whiteLevelSelect"
+                  value={ui.whiteLevel}
+                  onChange={(e) => store.setWhiteLevel(Number(e.currentTarget.value))}
+                >
+                  @for (const level of LEVELS; key level.value) {
+                    <option value={level.value}>{level.label}</option>
+                  }
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div class="player-setup-row">
+            <div class="form-group flex-1">
+              <label for="blackTypeSelect">Black</label>
+              <select
+                id="blackTypeSelect"
+                value={ui.blackType}
+                onChange={(e) => store.setBlackType(e.currentTarget.value as 'human' | 'stockfish')}
+              >
+                <option value="human">Human</option>
+                <option value="stockfish">Stockfish 19</option>
+              </select>
+            </div>
+            {ui.blackType === 'stockfish' && (
+              <div class="form-group flex-1">
+                <label for="blackLevelSelect">Black Level</label>
+                <select
+                  id="blackLevelSelect"
+                  value={ui.blackLevel}
+                  onChange={(e) => store.setBlackLevel(Number(e.currentTarget.value))}
+                >
+                  @for (const level of LEVELS; key level.value) {
+                    <option value={level.value}>{level.label}</option>
+                  }
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div class={['status-box', ui.statusKind !== 'normal' ? ui.statusKind : null]}>
+            {ui.statusText}
+          </div>
+
+          <div class="btn-group">
+            <button class="primary" onClick={() => store.newGame()}>
+              New Game
+            </button>
+            <button onClick={() => store.togglePauseResume()}>{ui.paused ? 'Resume Match' : 'Pause Match'}</button>
+            <button onClick={() => store.flip()}>Flip Board</button>
+            <button onClick={() => store.undoMove()}>Takeback</button>
+            <button onClick={() => store.toggleEditMode()}>{ui.editMode ? 'Done Editing' : 'Edit Board'}</button>
+          </div>
+        </div>
+
+        {ui.editMode && (
+          <div class="panel">
+            <div class="panel-title">Board Editor</div>
+            <div class="editor-palette">
+              @for (const piece of PALETTE; key piece.key) {
+                <button
+                  class={[
+                    'editor-piece-btn',
+                    ui.editorSelected?.color === piece.color && ui.editorSelected?.role === piece.role ? 'active' : null,
+                  ]}
+                  data-color={piece.color}
+                  title={piece.title}
+                  onClick={() => store.selectEditorPiece(piece.color, piece.role)}
+                >
+                  {piece.symbol}
+                </button>
+              }
+            </div>
+            <p class="modal-help">
+              Pick a piece, then click a square to place it. Drag pieces off the board to remove them.
+            </p>
+            <div class="btn-group">
+              <button class="primary" onClick={() => store.toggleEditMode()}>
+                Done
+              </button>
+              <button onClick={() => store.editorClear()}>Clear Board</button>
+              <button onClick={() => store.editorStart()}>Start Position</button>
+            </div>
+          </div>
+        )}
+
+        <div class="panel">
+          <div class="panel-title">Game Tools</div>
+          <div class="btn-group">
+            <button onClick={() => store.openIo()}>Import / Export</button>
+            <button onClick={() => store.quickExportPgn()}>Export PGN</button>
+            <button onClick={() => store.quickExportFen()}>Export FEN</button>
+            <button onClick={() => store.requestEvalOnly()}>Update Eval</button>
+          </div>
+          <label class="analysis-toggle" for="toggleAnalysis">
+            <input
+              type="checkbox"
+              id="toggleAnalysis"
+              checked={ui.showAnalysis}
+              onChange={(e) => store.setShowAnalysis(e.currentTarget.checked)}
+            />
+            Show engine analysis
+          </label>
+          <label class="analysis-toggle" for="toggleHistoryAnalysis">
+            <input
+              type="checkbox"
+              id="toggleHistoryAnalysis"
+              checked={ui.showMoveAnalysis}
+              onChange={(e) => store.setShowMoveAnalysis(e.currentTarget.checked)}
+            />
+            Show move analysis
+          </label>
+        </div>
+
+        {ui.showAnalysis && (
+          <div class="panel">
+            <div class="panel-title">Engine Analysis</div>
+            {ui.analysis.message ? (
+              <div class="analysis-empty" aria-live="polite">
+                {ui.analysis.message}
+              </div>
+            ) : (
+              <div>
+                <div class="analysis-primary">
+                  <span class="analysis-eval">{ui.analysis.evalText}</span>
+                  <span class="analysis-wdl">{ui.analysis.wdlText}</span>
+                </div>
+                <div class="analysis-stats">{ui.analysis.statsText}</div>
+                <div class="analysis-moves">
+                  <div>
+                    <span>Best</span>
+                    <strong>{ui.analysis.best}</strong>
+                  </div>
+                  <div>
+                    <span>Ponder</span>
+                    <strong>{ui.analysis.ponder}</strong>
+                  </div>
+                </div>
+                <div class="analysis-lines">
+                  @for (const line of ui.analysis.lines ?? []; key line.n) {
+                    <div class="analysis-line">
+                      <span class="analysis-line-number">{`${line.n}.`}</span>
+                      <span class="analysis-line-score">{line.score}</span>
+                      <span>{line.moves}</span>
+                    </div>
+                  }
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div class="panel">
+          <div class="panel-title">Move History</div>
+          {!ui.branchHidden && (
+            <div class="branch-controls">
+              <label for="branchSelect">Branch</label>
+              <select
+                id="branchSelect"
+                value={ui.branchActiveId}
+                onChange={(e) => store.selectBranch(e.currentTarget.value)}
+              >
+                @for (const branch of ui.branchItems; key branch.id) {
+                  <option value={branch.id}>{branch.name}</option>
+                }
+              </select>
+              <button onClick={() => store.navigateToPly(0)}>Start</button>
+            </div>
+          )}
+          {ui.branchStatus && <div class="branch-status">{ui.branchStatus}</div>}
+          <div
+            class={['history-container', ui.showMoveAnalysis ? null : 'hide-move-analysis']}
+            ref={historyRef}
+          >
+            <table class="history-table">
+              <tbody>
+                @for (const row of ui.rows; key `${row.num}-${row.white?.ply ?? 'empty'}`) {
+                  <tr>
+                    <td class="move-num">{row.num}</td>
+                    <MoveCell cell={row.white} onSelect={(ply) => store.navigateToPly(ply)} />
+                    <MoveCell cell={row.black} onSelect={(ply) => store.navigateToPly(ply)} />
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
 }

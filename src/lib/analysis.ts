@@ -1,23 +1,32 @@
 import { Chess } from 'chess.js';
 
-export function formatAnalysisScore(score, turn) {
+export interface Score {
+  type: 'cp' | 'mate';
+  value: number;
+}
+
+export interface Wdl {
+  win: number;
+  draw: number;
+  loss: number;
+}
+
+export function formatAnalysisScore(score: Score | null | undefined, turn: string): string {
   if (!score) return '...';
   const value = score.value * (turn === 'w' ? 1 : -1);
   if (score.type === 'mate') return `${value > 0 ? '+' : '-'}M${Math.abs(value)}`;
   return `${value > 0 ? '+' : ''}${(value / 100).toFixed(2)}`;
 }
 
-export function formatWhiteWdl(wdl, turn) {
+export function formatWhiteWdl(wdl: Wdl | null | undefined, turn: string): string {
   if (!wdl) return 'White W/D/L: unavailable';
-  const white = turn === 'w'
-    ? wdl
-    : { win: wdl.loss, draw: wdl.draw, loss: wdl.win };
+  const white = turn === 'w' ? wdl : { win: wdl.loss, draw: wdl.draw, loss: wdl.win };
   return `White W/D/L: ${(white.win / 10).toFixed(1)}% / ${(white.draw / 10).toFixed(1)}% / ${(white.loss / 10).toFixed(1)}%`;
 }
 
-export function uciLineToSan(fen, moves = []) {
+export function uciLineToSan(fen: string, moves: string[] = []): string[] {
   const position = new Chess(fen);
-  const san = [];
+  const san: string[] = [];
   for (const uci of moves) {
     try {
       const move = position.move({
@@ -34,20 +43,30 @@ export function uciLineToSan(fen, moves = []) {
   return san;
 }
 
-function whiteExpectation(result) {
+interface AnalysisResult {
+  bestmove?: string;
+  analysis?: { wdl?: Wdl | null } | null;
+  turn?: string;
+}
+
+function whiteExpectation(result: AnalysisResult | null | undefined): number | null {
   const wdl = result?.analysis?.wdl;
   if (!wdl) return null;
   const rootExpectation = (wdl.win + wdl.draw / 2) / 1000;
-  return result.turn === 'w' ? rootExpectation : 1 - rootExpectation;
+  return result!.turn === 'w' ? rootExpectation : 1 - rootExpectation;
 }
 
-export function classifyMove(before, after, playedMove) {
+export function classifyMove(
+  before: AnalysisResult | null | undefined,
+  after: AnalysisResult | null | undefined,
+  playedMove: string,
+): string {
   if (before?.bestmove === playedMove) return 'Best';
   const beforeWhite = whiteExpectation(before);
   const afterWhite = whiteExpectation(after);
   if (beforeWhite === null || afterWhite === null) return '';
 
-  const loss = Math.max(0, before.turn === 'w'
+  const loss = Math.max(0, before!.turn === 'w'
     ? beforeWhite - afterWhite
     : afterWhite - beforeWhite);
 
