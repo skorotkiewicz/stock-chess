@@ -10,7 +10,6 @@ const isExecutableFile = (candidate: string) => {
 	}
 };
 
-// ponytail: binary path resolved from CWD candidates (my-app or repo root).
 // Set STOCKFISH_PATH when running from another working directory.
 const CANDIDATE_NAMES = [
 	'stockfish-linux-x86-64-universal',
@@ -23,11 +22,7 @@ const CANDIDATE_NAMES = [
 
 const STOCKFISH_PATH =
 	process.env.STOCKFISH_PATH ??
-	CANDIDATE_NAMES.flatMap((name) => [
-		resolve(process.cwd(), 'stockfish', name),
-		resolve(process.cwd(), name),
-		resolve(process.cwd(), '../stockfish', name),
-	]).find((candidate) => isExecutableFile(candidate)) ??
+	CANDIDATE_NAMES.map((name) => resolve(process.cwd(), 'stockfish', name)).find((candidate) => isExecutableFile(candidate)) ??
 	resolve(process.cwd(), 'stockfish', CANDIDATE_NAMES[0]);
 
 if (!isExecutableFile(STOCKFISH_PATH)) {
