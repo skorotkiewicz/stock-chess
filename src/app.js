@@ -414,6 +414,17 @@ function onUserMove(orig, dest) {
   }
 }
 
+async function parseEngineResponse(res) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Server returned HTTP ${res.status}`);
+  return data;
+}
+
+function showEngineError(err) {
+  statusBox.className = 'status-box error';
+  statusBox.textContent = `Stockfish error: ${err.message}`;
+}
+
 // Request Stockfish move from backend API
 async function requestEngineMove(level) {
   if (isEngineThinking || isMatchPaused || chess.isGameOver()) return;
@@ -433,11 +444,7 @@ async function requestEngineMove(level) {
       signal: controller.signal,
     });
 
-    if (!res.ok) {
-      throw new Error(`Server returned HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
+    const data = await parseEngineResponse(res);
     if (controller !== engineAbortController) return;
     engineAbortController = null;
     isEngineThinking = false;
@@ -484,7 +491,7 @@ async function requestEngineMove(level) {
     isEngineThinking = false;
     if (err.name !== 'AbortError') console.error('Stockfish request failed:', err);
     updateBoard();
-    updateGameStatus();
+    showEngineError(err);
   }
 }
 
@@ -498,14 +505,13 @@ async function requestEvalOnly() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fen }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.eval && !editMode && fen === chess.fen()) {
-        updateEvalBar(data.eval, chess.turn());
-      }
+    const data = await parseEngineResponse(res);
+    if (data.eval && !editMode && fen === chess.fen()) {
+      updateEvalBar(data.eval, chess.turn());
     }
   } catch (err) {
     console.error('Eval request failed:', err);
+    if (!editMode && fen === chess.fen()) showEngineError(err);
   }
 }
 

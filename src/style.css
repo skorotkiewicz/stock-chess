@@ -226,7 +226,8 @@ header {
   color: #fbbf24;
 }
 
-.status-box.gameover {
+.status-box.gameover,
+.status-box.error {
   border-color: var(--color-red);
   color: #f87171;
 }

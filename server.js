@@ -38,11 +38,14 @@ class StockfishController {
     this.currentTask = null;
     this.stdoutBuffer = '';
     this.isReady = false;
+    this.destroying = false;
 
     this.startProcess();
   }
 
   startProcess() {
+    this.stdoutBuffer = '';
+    this.isReady = false;
     this.process = spawn(this.binaryPath, [], { stdio: ['pipe', 'pipe', 'inherit'] });
 
     this.process.stdout.on('data', (chunk) => {
@@ -53,9 +56,15 @@ class StockfishController {
     this.process.on('close', (code) => {
       console.log(`Stockfish process exited with code ${code}`);
       if (this.currentTask) {
-        this.currentTask.reject(new Error('Stockfish process terminated unexpectedly'));
+        const task = this.currentTask;
         this.currentTask = null;
         this.busy = false;
+        task.reject(new Error(task.error || 'Stockfish process terminated unexpectedly'));
+      }
+      if (!this.destroying) {
+        console.log('Restarting Stockfish process');
+        this.startProcess();
+        this.processNext();
       }
     });
 
@@ -82,6 +91,11 @@ class StockfishController {
       }
 
       if (this.busy && this.currentTask) {
+        if (line.startsWith('info string CRITICAL ERROR:')) {
+          this.currentTask.error = line.match(/Reason:\s*(.+)$/)?.[1] ||
+            line.replace(/^info string CRITICAL ERROR:\s*/, '');
+        }
+
         if (line.startsWith('info ') && line.includes('score ')) {
           const match = line.match(/score (cp|mate) (-?\d+)/);
           if (match) {
@@ -159,6 +173,7 @@ class StockfishController {
   }
 
   destroy() {
+    this.destroying = true;
     if (this.process) {
       this.send('quit');
       this.process.kill();

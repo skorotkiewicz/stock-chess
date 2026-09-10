@@ -83,7 +83,23 @@ try {
   assert.strictEqual(healthData.engine, 'Stockfish 19', 'Engine should be Stockfish 19');
   console.log('✓ Stockfish 19 health check passed');
 
-  // 5. Test Stockfish Move generation for White (Level 1) and Black (Level 5)
+  // 5. Test Stockfish error reporting and recovery
+  const unsupportedFen = 'rQbqkbnr/pppppppp/8/8/8/8/PPPPPPqP/RNBQKBNR w KQkq - 0 1';
+  const errorRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: unsupportedFen, level: 1 }),
+  });
+  assert.strictEqual(errorRes.status, 500, 'Unsupported position should return 500');
+  const errorData = await errorRes.json();
+  assert.strictEqual(
+    errorData.error,
+    'Unsupported position. Too many pieces for BLACK.',
+    'API should return Stockfish error details',
+  );
+  console.log('✓ Stockfish error reporting passed');
+
+  // 6. Test Stockfish Move generation for White (Level 1) and Black (Level 5)
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   const moveRes1 = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
     method: 'POST',
