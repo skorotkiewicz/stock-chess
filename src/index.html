@@ -29,7 +29,7 @@
         <div class="player-info" id="topPlayerInfo">
           <div class="player-name">
             <span class="player-indicator black" id="topIndicator"></span>
-            <span id="topPlayerName">Stockfish 19</span>
+            <span id="topPlayerName">Black (Stockfish Lv 3)</span>
           </div>
           <div class="engine-status" id="topPlayerStatus">Idle</div>
         </div>
@@ -49,12 +49,31 @@
               </div>
             </div>
           </div>
+
+          <!-- Import / Export Modal -->
+          <div class="modal-overlay hidden" id="ioModalOverlay">
+            <div class="modal-dialog">
+              <div class="modal-header">
+                <h3>Import / Export Game</h3>
+                <button class="btn-close" id="btnIoClose">&times;</button>
+              </div>
+              <p class="modal-help">Paste a FEN position or PGN notation to import, or copy current game notation.</p>
+              <textarea id="ioTextarea" rows="6" placeholder="Paste FEN or PGN here..."></textarea>
+              <div class="modal-feedback" id="ioFeedback"></div>
+              <div class="modal-actions">
+                <button class="primary" id="btnDoImport">Load Game</button>
+                <button id="btnCopyFen">Copy FEN</button>
+                <button id="btnCopyPgn">Copy PGN</button>
+                <button id="btnDownloadPgn">Download PGN</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="player-info" id="bottomPlayerInfo">
           <div class="player-name">
             <span class="player-indicator white" id="bottomIndicator"></span>
-            <span id="bottomPlayerName">You (White)</span>
+            <span id="bottomPlayerName">White (Human)</span>
           </div>
           <div class="engine-status" id="bottomPlayerStatus">Your turn</div>
         </div>
@@ -63,38 +82,74 @@
 
     <!-- Sidebar Controls & Moves -->
     <aside class="sidebar">
+      <!-- Players Setup Panel -->
       <div class="panel">
-        <div class="panel-title">Game Status</div>
+        <div class="panel-title">Players Setup</div>
+        
+        <!-- White Setup -->
+        <div class="player-setup-row">
+          <div class="form-group flex-1">
+            <label for="whiteTypeSelect">White</label>
+            <select id="whiteTypeSelect">
+              <option value="human" selected>Human</option>
+              <option value="stockfish">Stockfish 19</option>
+            </select>
+          </div>
+          <div class="form-group flex-1 hidden" id="whiteLevelGroup">
+            <label for="whiteLevelSelect">White Level</label>
+            <select id="whiteLevelSelect">
+              <option value="1">Lv 1 (1320)</option>
+              <option value="2">Lv 2 (1600)</option>
+              <option value="3" selected>Lv 3 (1900)</option>
+              <option value="4">Lv 4 (2300)</option>
+              <option value="5">Lv 5 (Max)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Black Setup -->
+        <div class="player-setup-row">
+          <div class="form-group flex-1">
+            <label for="blackTypeSelect">Black</label>
+            <select id="blackTypeSelect">
+              <option value="human">Human</option>
+              <option value="stockfish" selected>Stockfish 19</option>
+            </select>
+          </div>
+          <div class="form-group flex-1" id="blackLevelGroup">
+            <label for="blackLevelSelect">Black Level</label>
+            <select id="blackLevelSelect">
+              <option value="1">Lv 1 (1320)</option>
+              <option value="2">Lv 2 (1600)</option>
+              <option value="3" selected>Lv 3 (1900)</option>
+              <option value="4">Lv 4 (2300)</option>
+              <option value="5">Lv 5 (Max)</option>
+            </select>
+          </div>
+        </div>
+
         <div class="status-box" id="statusBox">White to move</div>
-
-        <div class="form-group">
-          <label for="difficultySelect">Stockfish Difficulty</label>
-          <select id="difficultySelect">
-            <option value="1">Level 1: Beginner (~1320 Elo)</option>
-            <option value="2">Level 2: Casual (~1600 Elo)</option>
-            <option value="3" selected>Level 3: Intermediate (~1900 Elo)</option>
-            <option value="4">Level 4: Master (~2300 Elo)</option>
-            <option value="5">Level 5: Maximum (Stockfish 19 full strength)</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="colorSelect">Play As</label>
-          <select id="colorSelect">
-            <option value="white" selected>White</option>
-            <option value="black">Black</option>
-            <option value="random">Random</option>
-          </select>
-        </div>
 
         <div class="btn-group">
           <button class="primary" id="btnNewGame">New Game</button>
+          <button id="btnPauseResume">Pause Match</button>
           <button id="btnFlip">Flip Board</button>
           <button id="btnUndo">Takeback</button>
+        </div>
+      </div>
+
+      <!-- Import / Export & Analysis Panel -->
+      <div class="panel">
+        <div class="panel-title">Game Tools</div>
+        <div class="btn-group">
+          <button id="btnOpenIoModal">Import / Export</button>
+          <button id="btnQuickExportPgn">Export PGN</button>
+          <button id="btnQuickExportFen">Export FEN</button>
           <button id="btnEval">Update Eval</button>
         </div>
       </div>
 
+      <!-- Move History Panel -->
       <div class="panel">
         <div class="panel-title">Move History</div>
         <div class="history-container" id="historyContainer">

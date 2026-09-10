@@ -1,12 +1,13 @@
 import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
 
-// State
+// Game state
 let chess = new Chess();
 let ground = null;
-let playerColor = 'white';
 let isEngineThinking = false;
+let isMatchPaused = false;
 let pendingPromotion = null;
+let engineTimer = null;
 
 // Sound synthesizer using Web Audio API
 class ChessAudio {
@@ -72,12 +73,6 @@ const boardEl = document.getElementById('board');
 const statusBox = document.getElementById('statusBox');
 const historyBody = document.getElementById('historyBody');
 const historyContainer = document.getElementById('historyContainer');
-const difficultySelect = document.getElementById('difficultySelect');
-const colorSelect = document.getElementById('colorSelect');
-const btnNewGame = document.getElementById('btnNewGame');
-const btnFlip = document.getElementById('btnFlip');
-const btnUndo = document.getElementById('btnUndo');
-const btnEval = document.getElementById('btnEval');
 const evalBlack = document.getElementById('evalBlack');
 const evalScoreTop = document.getElementById('evalScoreTop');
 const evalScoreBottom = document.getElementById('evalScoreBottom');
@@ -87,8 +82,52 @@ const topPlayerStatus = document.getElementById('topPlayerStatus');
 const bottomPlayerName = document.getElementById('bottomPlayerName');
 const bottomIndicator = document.getElementById('bottomIndicator');
 const bottomPlayerStatus = document.getElementById('bottomPlayerStatus');
+
+// Player setup controls
+const whiteTypeSelect = document.getElementById('whiteTypeSelect');
+const whiteLevelGroup = document.getElementById('whiteLevelGroup');
+const whiteLevelSelect = document.getElementById('whiteLevelSelect');
+const blackTypeSelect = document.getElementById('blackTypeSelect');
+const blackLevelGroup = document.getElementById('blackLevelGroup');
+const blackLevelSelect = document.getElementById('blackLevelSelect');
+
+// Buttons
+const btnNewGame = document.getElementById('btnNewGame');
+const btnPauseResume = document.getElementById('btnPauseResume');
+const btnFlip = document.getElementById('btnFlip');
+const btnUndo = document.getElementById('btnUndo');
+const btnEval = document.getElementById('btnEval');
+
+// Promotion
 const promotionOverlay = document.getElementById('promotionOverlay');
 const promotionChoices = document.getElementById('promotionChoices');
+
+// Import / Export modal
+const ioModalOverlay = document.getElementById('ioModalOverlay');
+const ioTextarea = document.getElementById('ioTextarea');
+const ioFeedback = document.getElementById('ioFeedback');
+const btnOpenIoModal = document.getElementById('btnOpenIoModal');
+const btnIoClose = document.getElementById('btnIoClose');
+const btnDoImport = document.getElementById('btnDoImport');
+const btnCopyFen = document.getElementById('btnCopyFen');
+const btnCopyPgn = document.getElementById('btnCopyPgn');
+const btnDownloadPgn = document.getElementById('btnDownloadPgn');
+const btnQuickExportPgn = document.getElementById('btnQuickExportPgn');
+const btnQuickExportFen = document.getElementById('btnQuickExportFen');
+
+// Helper to get configuration for a given color
+function getPlayerConfig(color) {
+  if (color === 'white' || color === 'w') {
+    return {
+      type: whiteTypeSelect.value,
+      level: parseInt(whiteLevelSelect.value, 10) || 3,
+    };
+  }
+  return {
+    type: blackTypeSelect.value,
+    level: parseInt(blackLevelSelect.value, 10) || 3,
+  };
+}
 
 // Compute legal destination squares for Chessground
 function getLegalDests(chessInstance) {
@@ -109,7 +148,6 @@ function getLegalDests(chessInstance) {
 // Convert score object to White's perspective percentage
 function scoreToWhitePercent(score, currentTurn) {
   if (!score) return 50;
-  // UCI score is relative to side to move
   const sideMultiplier = currentTurn === 'w' ? 1 : -1;
   if (score.type === 'mate') {
     const mateScore = score.value * sideMultiplier;
@@ -149,15 +187,16 @@ function updateEvalBar(score, currentTurn) {
 // Update board state in Chessground
 function updateBoard() {
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
-  const isPlayerTurn = currentTurn === playerColor && !isEngineThinking && !chess.isGameOver();
+  const config = getPlayerConfig(currentTurn);
+  const isHumanTurn = config.type === 'human' && !isEngineThinking && !isMatchPaused && !chess.isGameOver();
 
   ground.set({
     fen: chess.fen(),
     turnColor: currentTurn,
     check: chess.inCheck(),
     movable: {
-      color: isPlayerTurn ? playerColor : undefined,
-      dests: isPlayerTurn ? getLegalDests(chess) : new Map(),
+      color: isHumanTurn ? currentTurn : undefined,
+      dests: isHumanTurn ? getLegalDests(chess) : new Map(),
     },
   });
 
@@ -166,34 +205,42 @@ function updateBoard() {
 
 // Update player labels and turn status
 function updatePlayerLabels() {
+  const orientation = ground ? ground.state.orientation : 'white';
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
-  const engineColor = playerColor === 'white' ? 'black' : 'white';
 
-  if (playerColor === 'white') {
-    topPlayerName.textContent = 'Stockfish 19';
-    topIndicator.className = 'player-indicator black';
-    bottomPlayerName.textContent = 'You (White)';
-    bottomIndicator.className = 'player-indicator white';
-  } else {
-    topPlayerName.textContent = 'Stockfish 19';
-    topIndicator.className = 'player-indicator white';
-    bottomPlayerName.textContent = 'You (Black)';
-    bottomIndicator.className = 'player-indicator black';
+  const whiteConfig = getPlayerConfig('white');
+  const blackConfig = getPlayerConfig('black');
+
+  const whiteLabel = whiteConfig.type === 'stockfish'
+    ? `White (Stockfish Lv ${whiteConfig.level})`
+    : 'White (Human)';
+
+  const blackLabel = blackConfig.type === 'stockfish'
+    ? `Black (Stockfish Lv ${blackConfig.level})`
+    : 'Black (Human)';
+
+  const topColor = orientation === 'white' ? 'black' : 'white';
+  const bottomColor = orientation === 'white' ? 'white' : 'black';
+
+  topPlayerName.textContent = topColor === 'black' ? blackLabel : whiteLabel;
+  topIndicator.className = `player-indicator ${topColor}`;
+
+  bottomPlayerName.textContent = bottomColor === 'white' ? whiteLabel : blackLabel;
+  bottomIndicator.className = `player-indicator ${bottomColor}`;
+
+  function getStatusText(color) {
+    if (chess.isGameOver()) return 'Finished';
+    if (isMatchPaused) return 'Paused';
+    if (currentTurn !== color) return 'Waiting';
+    const cfg = getPlayerConfig(color);
+    if (cfg.type === 'stockfish') {
+      return isEngineThinking ? 'Thinking...' : 'Ready';
+    }
+    return 'Your turn';
   }
 
-  if (chess.isGameOver()) {
-    topPlayerStatus.textContent = 'Game finished';
-    bottomPlayerStatus.textContent = 'Game finished';
-  } else if (isEngineThinking) {
-    topPlayerStatus.textContent = 'Thinking...';
-    bottomPlayerStatus.textContent = 'Waiting';
-  } else if (currentTurn === playerColor) {
-    topPlayerStatus.textContent = 'Waiting';
-    bottomPlayerStatus.textContent = 'Your turn';
-  } else {
-    topPlayerStatus.textContent = 'Thinking...';
-    bottomPlayerStatus.textContent = 'Waiting';
-  }
+  topPlayerStatus.textContent = getStatusText(topColor);
+  bottomPlayerStatus.textContent = getStatusText(bottomColor);
 }
 
 // Update game status box
@@ -219,10 +266,13 @@ function updateGameStatus() {
     const side = chess.turn() === 'w' ? 'White' : 'Black';
     statusBox.textContent = `${side} is in check!`;
     statusBox.classList.add('check');
+  } else if (isMatchPaused) {
+    statusBox.textContent = 'Match paused';
   } else {
     const side = chess.turn() === 'w' ? 'White' : 'Black';
-    if (isEngineThinking) {
-      statusBox.textContent = 'Stockfish is calculating...';
+    const config = getPlayerConfig(side.toLowerCase());
+    if (config.type === 'stockfish') {
+      statusBox.textContent = `Stockfish (${side}) is calculating...`;
     } else {
       statusBox.textContent = `${side} to move`;
     }
@@ -247,6 +297,27 @@ function updateMoveHistory() {
     historyBody.appendChild(tr);
   }
   historyContainer.scrollTop = historyContainer.scrollHeight;
+}
+
+// Check if engine should move and trigger if appropriate
+function checkEngineTurn() {
+  if (isEngineThinking || isMatchPaused || chess.isGameOver()) return;
+  const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
+  const config = getPlayerConfig(currentTurn);
+
+  if (config.type === 'stockfish') {
+    const whiteConfig = getPlayerConfig('white');
+    const blackConfig = getPlayerConfig('black');
+    const isEngineVsEngine = whiteConfig.type === 'stockfish' && blackConfig.type === 'stockfish';
+
+    if (engineTimer) clearTimeout(engineTimer);
+
+    // Engine vs Engine has a comfortable pacing delay to watch moves
+    const delay = isEngineVsEngine ? 650 : 150;
+    engineTimer = setTimeout(() => {
+      requestEngineMove(config.level);
+    }, delay);
+  }
 }
 
 // Handle promotion piece selection
@@ -274,7 +345,6 @@ function executeMove(orig, dest, promotion) {
       return;
     }
 
-    // Play corresponding sound
     if (chess.inCheck()) {
       audio.play('check');
     } else if (move.captured) {
@@ -290,12 +360,7 @@ function executeMove(orig, dest, promotion) {
     updateBoard();
     updateMoveHistory();
     updateGameStatus();
-
-    // Trigger Stockfish if not game over and it is engine's turn
-    const nextTurn = chess.turn() === 'w' ? 'white' : 'black';
-    if (!chess.isGameOver() && nextTurn !== playerColor) {
-      requestEngineMove();
-    }
+    checkEngineTurn();
   } catch (err) {
     console.error('Invalid move attempted:', err);
     updateBoard();
@@ -318,13 +383,12 @@ function onUserMove(orig, dest) {
 }
 
 // Request Stockfish move from backend API
-async function requestEngineMove() {
-  if (isEngineThinking || chess.isGameOver()) return;
+async function requestEngineMove(level) {
+  if (isEngineThinking || isMatchPaused || chess.isGameOver()) return;
   isEngineThinking = true;
   updatePlayerLabels();
   updateGameStatus();
 
-  const level = parseInt(difficultySelect.value, 10) || 3;
   const fen = chess.fen();
 
   try {
@@ -373,6 +437,8 @@ async function requestEngineMove() {
     updateBoard();
     updateMoveHistory();
     updateGameStatus();
+
+    checkEngineTurn();
   } catch (err) {
     console.error('Stockfish request failed:', err);
     isEngineThinking = false;
@@ -401,14 +467,20 @@ async function requestEvalOnly() {
   }
 }
 
-// Undo move (takes back 2 plies when playing against engine)
+// Undo move (takes back 2 plies when human vs engine, 1 ply otherwise)
 function undoMove() {
   if (isEngineThinking) return;
+  if (engineTimer) clearTimeout(engineTimer);
+
   const history = chess.history();
   if (history.length === 0) return;
 
-  const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
-  if (currentTurn === playerColor && history.length >= 2) {
+  const whiteConfig = getPlayerConfig('white');
+  const blackConfig = getPlayerConfig('black');
+  const isHumanVsEngine = (whiteConfig.type === 'human' && blackConfig.type === 'stockfish') ||
+                          (whiteConfig.type === 'stockfish' && blackConfig.type === 'human');
+
+  if (isHumanVsEngine && history.length >= 2) {
     chess.undo();
     chess.undo();
   } else {
@@ -423,51 +495,152 @@ function undoMove() {
   updateMoveHistory();
   updateGameStatus();
   requestEvalOnly();
+  checkEngineTurn();
 }
 
 // Start a new game
 function startNewGame() {
-  if (isEngineThinking) return;
+  if (engineTimer) clearTimeout(engineTimer);
+  isEngineThinking = false;
+  isMatchPaused = false;
+  btnPauseResume.textContent = 'Pause Match';
+
   chess.reset();
 
-  const selectedColor = colorSelect.value;
-  if (selectedColor === 'random') {
-    playerColor = Math.random() < 0.5 ? 'white' : 'black';
+  // If White is engine and Black is human, orient board for Black
+  const whiteConfig = getPlayerConfig('white');
+  const blackConfig = getPlayerConfig('black');
+  if (whiteConfig.type === 'stockfish' && blackConfig.type === 'human') {
+    ground.set({ orientation: 'black' });
   } else {
-    playerColor = selectedColor;
+    ground.set({ orientation: 'white' });
   }
 
   ground.set({
     fen: chess.fen(),
-    orientation: playerColor,
     turnColor: 'white',
     check: false,
     lastMove: undefined,
-    movable: {
-      color: playerColor === 'white' ? 'white' : undefined,
-      dests: playerColor === 'white' ? getLegalDests(chess) : new Map(),
-    },
   });
 
   evalBlack.style.height = '50%';
   evalScoreTop.textContent = '0.0';
   evalScoreBottom.textContent = '0.0';
 
-  updatePlayerLabels();
+  updateBoard();
   updateMoveHistory();
   updateGameStatus();
+  requestEvalOnly();
 
-  // If player chose black, Stockfish makes the first move
-  if (playerColor === 'black') {
-    requestEngineMove();
+  checkEngineTurn();
+}
+
+// Toggle Pause / Resume
+function togglePauseResume() {
+  isMatchPaused = !isMatchPaused;
+  btnPauseResume.textContent = isMatchPaused ? 'Resume Match' : 'Pause Match';
+  updateBoard();
+  updateGameStatus();
+
+  if (!isMatchPaused) {
+    checkEngineTurn();
+  } else if (engineTimer) {
+    clearTimeout(engineTimer);
   }
 }
 
-// Initialize Chessground board
+// Import / Export Functions
+function showFeedback(text, isError = false) {
+  ioFeedback.textContent = text;
+  ioFeedback.className = `modal-feedback ${isError ? 'error' : 'success'}`;
+}
+
+function openIoModal() {
+  ioTextarea.value = chess.pgn() || chess.fen();
+  ioFeedback.textContent = '';
+  ioModalOverlay.classList.remove('hidden');
+}
+
+function closeIoModal() {
+  ioModalOverlay.classList.add('hidden');
+}
+
+function copyToClipboard(text, successMsg) {
+  navigator.clipboard.writeText(text).then(() => {
+    showFeedback(successMsg);
+  }).catch(() => {
+    // Fallback using textarea select
+    ioTextarea.value = text;
+    ioTextarea.select();
+    document.execCommand('copy');
+    showFeedback(successMsg);
+  });
+}
+
+function downloadPgnFile() {
+  const pgnContent = chess.pgn();
+  const blob = new Blob([pgnContent || chess.fen()], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `stockfish-game-${Date.now()}.pgn`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showFeedback('PGN downloaded.');
+}
+
+function loadGameString(input) {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    showFeedback('Input is empty.', true);
+    return;
+  }
+
+  const candidate = new Chess();
+  let success = false;
+
+  // Try FEN format
+  try {
+    candidate.load(trimmed);
+    success = true;
+  } catch {}
+
+  // Try PGN format
+  if (!success) {
+    try {
+      candidate.loadPgn(trimmed);
+      success = true;
+    } catch {}
+  }
+
+  if (!success) {
+    showFeedback('Invalid FEN or PGN string.', true);
+    return;
+  }
+
+  if (engineTimer) clearTimeout(engineTimer);
+  chess = candidate;
+  isEngineThinking = false;
+
+  updateBoard();
+  updateMoveHistory();
+  updateGameStatus();
+  requestEvalOnly();
+
+  showFeedback('Game successfully loaded!');
+  setTimeout(() => {
+    closeIoModal();
+    checkEngineTurn();
+  }, 600);
+}
+
+// Initialize Chessground board and UI bindings
 function init() {
   ground = Chessground(boardEl, {
     fen: chess.fen(),
-    orientation: playerColor,
+    orientation: 'white',
     turnColor: 'white',
     coordinates: true,
     animation: {
@@ -475,7 +648,7 @@ function init() {
       duration: 200,
     },
     movable: {
-      color: playerColor,
+      color: 'white',
       free: false,
       dests: getLegalDests(chess),
       events: {
@@ -486,15 +659,61 @@ function init() {
     drawable: { enabled: true },
   });
 
+  // Player type switches
+  whiteTypeSelect.addEventListener('change', () => {
+    const isEngine = whiteTypeSelect.value === 'stockfish';
+    whiteLevelGroup.classList.toggle('hidden', !isEngine);
+    updateBoard();
+    checkEngineTurn();
+  });
+
+  blackTypeSelect.addEventListener('change', () => {
+    const isEngine = blackTypeSelect.value === 'stockfish';
+    blackLevelGroup.classList.toggle('hidden', !isEngine);
+    updateBoard();
+    checkEngineTurn();
+  });
+
+  whiteLevelSelect.addEventListener('change', updatePlayerLabels);
+  blackLevelSelect.addEventListener('change', updatePlayerLabels);
+
+  // Match buttons
   btnNewGame.addEventListener('click', startNewGame);
+  btnPauseResume.addEventListener('click', togglePauseResume);
   btnFlip.addEventListener('click', () => {
     ground.toggleOrientation();
+    updatePlayerLabels();
     updateEvalBar({ type: 'cp', value: 0 }, chess.turn());
   });
   btnUndo.addEventListener('click', undoMove);
   btnEval.addEventListener('click', requestEvalOnly);
 
-  // Initial UI state
+  // Modal & I/O
+  btnOpenIoModal.addEventListener('click', openIoModal);
+  btnIoClose.addEventListener('click', closeIoModal);
+  ioModalOverlay.addEventListener('click', (e) => {
+    if (e.target === ioModalOverlay) closeIoModal();
+  });
+
+  btnDoImport.addEventListener('click', () => loadGameString(ioTextarea.value));
+  btnCopyFen.addEventListener('click', () => copyToClipboard(chess.fen(), 'FEN copied to clipboard!'));
+  btnCopyPgn.addEventListener('click', () => copyToClipboard(chess.pgn() || chess.fen(), 'PGN copied to clipboard!'));
+  btnDownloadPgn.addEventListener('click', downloadPgnFile);
+
+  // Quick export buttons in sidebar
+  btnQuickExportFen.addEventListener('click', () => {
+    navigator.clipboard.writeText(chess.fen());
+    statusBox.textContent = 'FEN copied to clipboard!';
+    setTimeout(updateGameStatus, 1500);
+  });
+
+  btnQuickExportPgn.addEventListener('click', () => {
+    navigator.clipboard.writeText(chess.pgn() || chess.fen());
+    statusBox.textContent = 'PGN copied to clipboard!';
+    setTimeout(updateGameStatus, 1500);
+  });
+
+  // Initial state
   updatePlayerLabels();
   updateGameStatus();
   requestEvalOnly();
