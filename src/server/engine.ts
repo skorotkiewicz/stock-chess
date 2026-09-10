@@ -2,11 +2,14 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// ponytail: binary path resolved from CWD (my-app during dev/preview). Set
-// STOCKFISH_PATH when running from another working directory.
+// ponytail: binary path resolved from CWD candidates (my-app or repo root).
+// Set STOCKFISH_PATH when running from another working directory.
+const STOCKFISH_NAME = 'stockfish-linux-x86-64-universal';
 const STOCKFISH_PATH =
 	process.env.STOCKFISH_PATH ??
-	resolve(process.cwd(), '../stockfish/stockfish-linux-x86-64-universal');
+	[resolve(process.cwd(), 'stockfish', STOCKFISH_NAME), resolve(process.cwd(), STOCKFISH_NAME), resolve(process.cwd(), '../stockfish', STOCKFISH_NAME)]
+		.find((candidate) => existsSync(candidate)) ??
+	resolve(process.cwd(), STOCKFISH_NAME);
 
 if (!existsSync(STOCKFISH_PATH)) {
 	throw new Error(`Stockfish binary not found at: ${STOCKFISH_PATH}`);
@@ -80,7 +83,7 @@ class StockfishController {
 			this.handleOutput();
 		});
 
-		this.process.on('close', (code) => {
+		this.process.on('close', (code: number | null) => {
 			console.log(`Stockfish process exited with code ${code}`);
 			if (this.currentTask) {
 				const task = this.currentTask;
@@ -171,7 +174,11 @@ class StockfishController {
 		}
 	}
 
-	query(fen: string, { level = 3, depth, movetime, multipv = 1 } = {}): Promise<EngineResult> {
+	query(
+		fen: string,
+		options: { level?: number; depth?: number; movetime?: number; multipv?: number } = {},
+	): Promise<EngineResult> {
+		const { level = 3, depth, movetime, multipv = 1 } = options;
 		return new Promise((resolve, reject) => {
 			const config = DIFFICULTY_LEVELS[level] || DIFFICULTY_LEVELS[3];
 			const targetDepth = depth || config.depth;
@@ -192,7 +199,7 @@ class StockfishController {
 		});
 	}
 
-	evaluate(fen: string, { depth = 10, movetime = 300 } = {}) {
+	evaluate(fen: string, { depth = 10, movetime = 300 }: { depth?: number; movetime?: number } = {}) {
 		return this.query(fen, { level: 3, depth, movetime, multipv: 3 });
 	}
 

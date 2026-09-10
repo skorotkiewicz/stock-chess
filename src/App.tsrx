@@ -29,11 +29,10 @@ const LEVELS = [
 ];
 
 function MoveCell({ cell, onSelect }: { cell: HistoryCell | null; onSelect: (ply: number) => void }) @{
-  if (!cell) {
+  @if (!cell) {
     <td class="move-ply" />
-    return;
-  }
-  <td class={['move-ply', cell.active ? 'active' : null, cell.future ? 'future' : null]}>
+  } @else {
+    <td class={['move-ply', cell.active ? 'active' : null, cell.future ? 'future' : null]}>
       <button
         class="move-entry history-move"
         title={`View position after ${cell.san}`}
@@ -50,20 +49,23 @@ function MoveCell({ cell, onSelect }: { cell: HistoryCell | null; onSelect: (ply
         )}
       </button>
     </td>
+  }
 }
 
 export function App() @{
   const ui$ = useSignal$(initialSnapshot());
   const store = useMemo(() => new ChessStore((snapshot) => ui$.set(snapshot)), []);
-  const boardRef = useRef<HTMLDivElement>(null);
-  const historyRef = useRef<HTMLDivElement>(null);
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (boardRef.current) store.attachBoard(boardRef.current);
+    const el = boardRef.current as HTMLDivElement | null;
+    if (el) store.attachBoard(el);
   }, []);
 
   useEffect(() => {
-    historyRef.current?.querySelector('.move-ply.active')?.scrollIntoView({ block: 'nearest' });
+    const container = historyRef.current as HTMLDivElement | null;
+    container?.querySelector('.move-ply.active')?.scrollIntoView({ block: 'nearest' });
   }, [ui$.get().rows]);
 
   const ui = ui$.get();
