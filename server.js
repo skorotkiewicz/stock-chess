@@ -97,12 +97,24 @@ class StockfishController {
         }
 
         if (line.startsWith('info ') && line.includes('score ')) {
-          const match = line.match(/score (cp|mate) (-?\d+)/);
-          if (match) {
-            this.currentTask.eval = {
-              type: match[1],
-              value: parseInt(match[2], 10),
-            };
+          const score = line.match(/score (cp|mate) (-?\d+)/);
+          const wdl = line.match(/ wdl (\d+) (\d+) (\d+)/);
+          const value = (name) => parseInt(line.match(new RegExp(`(?:^| )${name} (\\d+)`))?.[1] || '0', 10);
+          if (score) {
+            const multipv = value('multipv') || 1;
+            this.currentTask.lines.set(multipv, {
+              multipv,
+              depth: value('depth'),
+              seldepth: value('seldepth'),
+              score: { type: score[1], value: parseInt(score[2], 10) },
+              wdl: wdl ? { win: Number(wdl[1]), draw: Number(wdl[2]), loss: Number(wdl[3]) } : null,
+              nodes: value('nodes'),
+              nps: value('nps'),
+              hashfull: value('hashfull'),
+              tbhits: value('tbhits'),
+              time: value('time'),
+              pv: line.match(/ pv (.+)$/)?.[1].split(/\s+/) || [],
+            });
           }
         }
 
@@ -115,10 +127,15 @@ class StockfishController {
           this.currentTask = null;
           this.busy = false;
 
+          const lines = [...task.lines.values()].sort((a, b) => a.multipv - b.multipv);
+          const analysis = lines.find((item) => item.multipv === 1) || null;
           task.resolve({
             bestmove,
             ponder,
-            eval: task.eval || { type: 'cp', value: 0 },
+            turn: task.fen.split(' ')[1],
+            eval: analysis?.score || { type: 'cp', value: 0 },
+            analysis,
+            lines,
           });
 
           this.processNext();
@@ -127,7 +144,7 @@ class StockfishController {
     }
   }
 
-  query(fen, { level = 3, depth, movetime } = {}) {
+  query(fen, { level = 3, depth, movetime, multipv = 1 } = {}) {
     return new Promise((resolve, reject) => {
       const config = DIFFICULTY_LEVELS[level] || DIFFICULTY_LEVELS[3];
       const targetDepth = depth || config.depth;
@@ -138,6 +155,8 @@ class StockfishController {
         config,
         depth: targetDepth,
         movetime: targetMovetime,
+        multipv,
+        lines: new Map(),
         resolve,
         reject,
       });
@@ -147,7 +166,7 @@ class StockfishController {
   }
 
   evaluate(fen, { depth = 10, movetime = 300 } = {}) {
-    return this.query(fen, { level: 3, depth, movetime });
+    return this.query(fen, { level: 3, depth, movetime, multipv: 3 });
   }
 
   processNext() {
@@ -155,11 +174,12 @@ class StockfishController {
 
     this.busy = true;
     this.currentTask = this.queue.shift();
-    this.currentTask.eval = null;
 
-    const { fen, config, depth, movetime } = this.currentTask;
+    const { fen, config, depth, movetime, multipv } = this.currentTask;
 
     this.send('stop');
+    this.send('setoption name UCI_ShowWDL value true');
+    this.send(`setoption name MultiPV value ${multipv}`);
     this.send(`setoption name Skill Level value ${config.skill}`);
     if (config.limitElo) {
       this.send('setoption name UCI_LimitStrength value true');

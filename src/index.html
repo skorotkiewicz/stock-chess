@@ -162,6 +162,24 @@
         </div>
       </div>
 
+      <!-- Engine Analysis Panel -->
+      <div class="panel" id="analysisPanel">
+        <div class="panel-title">Engine Analysis</div>
+        <div class="analysis-empty" id="analysisEmpty" aria-live="polite">Analyzing position...</div>
+        <div class="hidden" id="analysisContent">
+          <div class="analysis-primary">
+            <span class="analysis-eval" id="analysisEval">0.00</span>
+            <span class="analysis-wdl" id="analysisWdl">White W/D/L: 0% / 100% / 0%</span>
+          </div>
+          <div class="analysis-stats" id="analysisStats"></div>
+          <div class="analysis-moves">
+            <div><span>Best</span><strong id="analysisBest">...</strong></div>
+            <div><span>Ponder</span><strong id="analysisPonder">...</strong></div>
+          </div>
+          <div class="analysis-lines" id="analysisLines"></div>
+        </div>
+      </div>
+
       <!-- Move History Panel -->
       <div class="panel">
         <div class="panel-title">Move History</div>

@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { buildEditorFen } from './src/editor-position.js';
+import { classifyMove, formatAnalysisScore, uciLineToSan } from './src/analysis.js';
 
 console.log('--- Running Chess App Verification Tests ---');
 
@@ -31,6 +32,25 @@ assert.strictEqual(
   'Editor should remove castling rights without the required rook',
 );
 console.log('✓ Board editor FEN metadata verified');
+
+assert.strictEqual(formatAnalysisScore({ type: 'cp', value: 28 }, 'b'), '-0.28');
+assert.strictEqual(formatAnalysisScore({ type: 'mate', value: -3 }, 'b'), '+M3');
+assert.deepStrictEqual(
+  uciLineToSan('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', ['g1f3', 'b8c6']),
+  ['Nf3', 'Nc6'],
+);
+const beforeMove = {
+  turn: 'w',
+  bestmove: 'd2d4',
+  analysis: { wdl: { win: 500, draw: 400, loss: 100 } },
+};
+const afterMistake = {
+  turn: 'b',
+  analysis: { wdl: { win: 250, draw: 400, loss: 350 } },
+};
+assert.strictEqual(classifyMove(beforeMove, afterMistake, 'd2d4'), 'Best');
+assert.strictEqual(classifyMove(beforeMove, afterMistake, 'e2e4'), 'Mistake');
+console.log('✓ Analysis formatting and move classification verified');
 
 // 1. Verify build artifacts
 assert(existsSync('public/bundle.js'), 'public/bundle.js must exist');
@@ -65,6 +85,7 @@ try {
   assert.strictEqual(htmlRes.status, 200, 'Index HTML should return 200');
   const htmlText = await htmlRes.text();
   assert(htmlText.includes('Stockfish 19 Chess'), 'Index HTML should contain title');
+  assert(htmlText.includes('id="analysisPanel"'), 'Index HTML should contain analysis panel');
   console.log('✓ Static HTML served correctly');
 
   const jsRes = await fetch(`http://localhost:${TEST_PORT}/bundle.js`);
@@ -148,7 +169,20 @@ try {
   assert.strictEqual(evalRes.status, 200, 'Eval API should return 200');
   const evalData = await evalRes.json();
   assert(evalData.eval && typeof evalData.eval.value === 'number', 'eval should return numeric value');
-  console.log(`✓ Stockfish 19 eval passed (eval: ${evalData.eval.type} ${evalData.eval.value})`);
+  assert.strictEqual(evalData.lines.length, 3, 'Eval should return three candidate lines');
+  assert(evalData.analysis.depth > 0, 'Analysis should include search depth');
+  assert(evalData.analysis.seldepth > 0, 'Analysis should include selective depth');
+  assert(evalData.analysis.nodes > 0, 'Analysis should include searched nodes');
+  assert(evalData.analysis.nps > 0, 'Analysis should include nodes per second');
+  assert(typeof evalData.analysis.hashfull === 'number', 'Analysis should include hash usage');
+  assert(evalData.analysis.time > 0, 'Analysis should include elapsed time');
+  assert(Array.isArray(evalData.analysis.pv) && evalData.analysis.pv.length > 0, 'Analysis should include a PV');
+  assert.strictEqual(
+    evalData.analysis.wdl.win + evalData.analysis.wdl.draw + evalData.analysis.wdl.loss,
+    1000,
+    'WDL values should total 1000',
+  );
+  console.log(`✓ Stockfish 19 analysis passed (${evalData.lines.length} lines, depth ${evalData.analysis.depth})`);
 
   console.log('\n--- All tests passed successfully! ---');
   process.exit(0);

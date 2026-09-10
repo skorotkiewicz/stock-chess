@@ -1,6 +1,7 @@
 import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
 import { buildEditorFen } from './editor-position.js';
+import { classifyMove, formatAnalysisScore, uciLineToSan } from './analysis.js';
 
 // Game state
 let chess = new Chess();
@@ -12,6 +13,8 @@ let engineTimer = null;
 let engineAbortController = null;
 let editMode = false;
 let selectedPiece = null;
+let analysisGeneration = 0;
+const positionAnalyses = new Map();
 
 const PIECE_SYMBOLS = {
   'w king': '♔', 'w queen': '♕', 'w rook': '♖', 'w bishop': '♗', 'w knight': '♘', 'w pawn': '♙',
@@ -82,6 +85,14 @@ const boardEl = document.getElementById('board');
 const statusBox = document.getElementById('statusBox');
 const historyBody = document.getElementById('historyBody');
 const historyContainer = document.getElementById('historyContainer');
+const analysisEmpty = document.getElementById('analysisEmpty');
+const analysisContent = document.getElementById('analysisContent');
+const analysisEval = document.getElementById('analysisEval');
+const analysisWdl = document.getElementById('analysisWdl');
+const analysisStats = document.getElementById('analysisStats');
+const analysisBest = document.getElementById('analysisBest');
+const analysisPonder = document.getElementById('analysisPonder');
+const analysisLines = document.getElementById('analysisLines');
 const evalBlack = document.getElementById('evalBlack');
 const evalScoreTop = document.getElementById('evalScoreTop');
 const evalScoreBottom = document.getElementById('evalScoreBottom');
@@ -180,13 +191,7 @@ function updateEvalBar(score, currentTurn) {
   const whitePercent = scoreToWhitePercent(score, currentTurn);
   const isFlipped = ground ? ground.state.orientation === 'black' : false;
 
-  const displayScore = score.type === 'mate'
-    ? `M${Math.abs(score.value)}`
-    : (score.value / 100).toFixed(1);
-
-  const formattedScore = score.type === 'mate'
-    ? (score.value > 0 ? `+M${score.value}` : `-M${Math.abs(score.value)}`)
-    : (score.value > 0 ? `+${displayScore}` : displayScore);
+  const formattedScore = formatAnalysisScore(score, currentTurn);
 
   if (!isFlipped) {
     evalBlack.style.height = `${100 - whitePercent}%`;
@@ -197,6 +202,63 @@ function updateEvalBar(score, currentTurn) {
     evalScoreTop.textContent = formattedScore;
     evalScoreBottom.textContent = formattedScore;
   }
+}
+
+function setAnalysisMessage(message) {
+  analysisEmpty.textContent = message;
+  analysisEmpty.classList.remove('hidden');
+  analysisContent.classList.add('hidden');
+}
+
+function resetAnalysis(message = 'Analyzing position...') {
+  analysisGeneration += 1;
+  positionAnalyses.clear();
+  setAnalysisMessage(message);
+}
+
+function renderAnalysis(data, fen) {
+  const analysis = data.analysis;
+  if (!analysis) {
+    setAnalysisMessage('No analysis available.');
+    return;
+  }
+
+  const wdl = analysis.wdl;
+  const whiteWdl = data.turn === 'w'
+    ? wdl
+    : { win: wdl.loss, draw: wdl.draw, loss: wdl.win };
+  const bestLine = uciLineToSan(fen, [data.bestmove, data.ponder].filter(Boolean));
+
+  analysisEval.textContent = formatAnalysisScore(analysis.score, data.turn);
+  analysisWdl.textContent = `White W/D/L: ${(whiteWdl.win / 10).toFixed(1)}% / ${(whiteWdl.draw / 10).toFixed(1)}% / ${(whiteWdl.loss / 10).toFixed(1)}%`;
+  analysisStats.textContent = `Depth ${analysis.depth}/${analysis.seldepth} · ${analysis.nodes.toLocaleString()} nodes · ${analysis.nps.toLocaleString()} NPS · Hash ${(analysis.hashfull / 10).toFixed(1)}% · ${analysis.time} ms · TB ${analysis.tbhits}`;
+  analysisBest.textContent = bestLine[0] || data.bestmove || 'None';
+  analysisPonder.textContent = bestLine[1] || data.ponder || 'None';
+  analysisLines.innerHTML = '';
+
+  for (const line of data.lines) {
+    const row = document.createElement('div');
+    const number = document.createElement('span');
+    const score = document.createElement('span');
+    const moves = document.createElement('span');
+    row.className = 'analysis-line';
+    number.className = 'analysis-line-number';
+    score.className = 'analysis-line-score';
+    number.textContent = `${line.multipv}.`;
+    score.textContent = formatAnalysisScore(line.score, data.turn);
+    moves.textContent = uciLineToSan(fen, line.pv).join(' ') || 'No continuation';
+    row.append(number, score, moves);
+    analysisLines.appendChild(row);
+  }
+
+  analysisEmpty.classList.add('hidden');
+  analysisContent.classList.remove('hidden');
+}
+
+function storePositionAnalysis(ply, data, fen, showCurrent = false) {
+  positionAnalyses.set(ply, { data, fen });
+  if (showCurrent) renderAnalysis(data, fen);
+  updateMoveHistory();
 }
 
 // Update board state in Chessground
@@ -304,19 +366,49 @@ function updateGameStatus() {
 
 // Render move history
 function updateMoveHistory() {
-  const history = chess.history();
+  const history = chess.history({ verbose: true });
   historyBody.innerHTML = '';
-  for (let i = 0; i < history.length; i += 2) {
-    const moveNum = Math.floor(i / 2) + 1;
-    const whiteMove = history[i] || '';
-    const blackMove = history[i + 1] || '';
 
+  function moveCell(move, ply) {
+    const td = document.createElement('td');
+    td.className = `move-ply ${ply === history.length - 1 ? 'active' : ''}`;
+    if (!move) return td;
+
+    const entry = document.createElement('div');
+    const san = document.createElement('span');
+    const meta = document.createElement('span');
+    const after = positionAnalyses.get(ply + 1)?.data;
+    const before = positionAnalyses.get(ply)?.data;
+    const playedMove = `${move.from}${move.to}${move.promotion || ''}`;
+    const quality = classifyMove(before, after, playedMove);
+    entry.className = 'move-entry';
+    meta.className = 'move-meta';
+    san.textContent = move.san;
+
+    if (after) {
+      const evaluation = document.createElement('span');
+      evaluation.textContent = formatAnalysisScore(after.eval, after.turn);
+      meta.appendChild(evaluation);
+    }
+    if (quality) {
+      const label = document.createElement('span');
+      label.className = `move-quality ${quality.toLowerCase()}`;
+      label.textContent = quality;
+      meta.appendChild(label);
+    }
+
+    entry.appendChild(san);
+    if (meta.childNodes.length) entry.appendChild(meta);
+    td.appendChild(entry);
+    return td;
+  }
+
+  for (let i = 0; i < history.length; i += 2) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="move-num">${moveNum}.</td>
-      <td class="move-ply ${i === history.length - 1 ? 'active' : ''}">${whiteMove}</td>
-      <td class="move-ply ${i + 1 === history.length - 1 ? 'active' : ''}">${blackMove}</td>
-    `;
+    const moveNum = document.createElement('td');
+    moveNum.className = 'move-num';
+    moveNum.textContent = `${Math.floor(i / 2) + 1}.`;
+    tr.append(moveNum, moveCell(history[i], i), moveCell(history[i + 1], i + 1));
     historyBody.appendChild(tr);
   }
   historyContainer.scrollTop = historyContainer.scrollHeight;
@@ -392,6 +484,8 @@ function executeMove(orig, dest, promotion) {
     updateBoard();
     updateMoveHistory();
     updateGameStatus();
+    const nextPlayer = getPlayerConfig(chess.turn());
+    if (nextPlayer.type === 'human' || chess.isGameOver()) requestEvalOnly();
     checkEngineTurn();
   } catch (err) {
     console.error('Invalid move attempted:', err);
@@ -421,8 +515,10 @@ async function parseEngineResponse(res) {
 }
 
 function showEngineError(err) {
+  const message = `Stockfish error: ${err.message}`;
   statusBox.className = 'status-box error';
-  statusBox.textContent = `Stockfish error: ${err.message}`;
+  statusBox.textContent = message;
+  setAnalysisMessage(message);
 }
 
 // Request Stockfish move from backend API
@@ -451,6 +547,8 @@ async function requestEngineMove(level) {
 
     if (editMode || fen !== chess.fen()) return;
 
+    storePositionAnalysis(chess.history().length, data, fen);
+
     if (!data.bestmove || data.bestmove === '(none)') {
       updateBoard();
       updateGameStatus();
@@ -476,14 +574,12 @@ async function requestEngineMove(level) {
       });
     }
 
-    if (data.eval) {
-      updateEvalBar(data.eval, chess.turn());
-    }
+    if (data.eval) updateEvalBar(data.eval, data.turn);
 
     updateBoard();
     updateMoveHistory();
     updateGameStatus();
-
+    requestEvalOnly();
     checkEngineTurn();
   } catch (err) {
     if (controller !== engineAbortController) return;
@@ -499,6 +595,8 @@ async function requestEngineMove(level) {
 async function requestEvalOnly() {
   if (isEngineThinking || editMode) return;
   const fen = chess.fen();
+  const ply = chess.history().length;
+  const generation = analysisGeneration;
   try {
     const res = await fetch('/api/stockfish/eval', {
       method: 'POST',
@@ -506,12 +604,12 @@ async function requestEvalOnly() {
       body: JSON.stringify({ fen }),
     });
     const data = await parseEngineResponse(res);
-    if (data.eval && !editMode && fen === chess.fen()) {
-      updateEvalBar(data.eval, chess.turn());
-    }
+    if (editMode || generation !== analysisGeneration || fen !== chess.fen() || ply !== chess.history().length) return;
+    if (data.eval) updateEvalBar(data.eval, data.turn);
+    storePositionAnalysis(ply, data, fen, true);
   } catch (err) {
     console.error('Eval request failed:', err);
-    if (!editMode && fen === chess.fen()) showEngineError(err);
+    if (!editMode && generation === analysisGeneration && fen === chess.fen()) showEngineError(err);
   }
 }
 
@@ -538,6 +636,14 @@ function undoMove() {
   ground.set({
     lastMove: undefined,
   });
+
+  analysisGeneration += 1;
+  for (const ply of positionAnalyses.keys()) {
+    if (ply > chess.history().length) positionAnalyses.delete(ply);
+  }
+  const currentAnalysis = positionAnalyses.get(chess.history().length);
+  if (currentAnalysis) renderAnalysis(currentAnalysis.data, currentAnalysis.fen);
+  else setAnalysisMessage('Analyzing position...');
 
   updateBoard();
   updateMoveHistory();
@@ -587,6 +693,7 @@ function onBoardPlace(e) {
 
 function enterEditMode() {
   cancelEngineMove();
+  resetAnalysis('Finish editing to analyze this position.');
   editMode = true;
   selectedPiece = null;
   pendingPromotion = null;
@@ -622,6 +729,7 @@ function exitEditMode() {
   selectedPiece = null;
   editorPanel.classList.add('hidden');
   btnEditBoard.textContent = 'Edit Board';
+  resetAnalysis();
   updateBoard();
   updateMoveHistory();
   updateGameStatus();
@@ -649,6 +757,7 @@ function startNewGame() {
   btnPauseResume.textContent = 'Pause Match';
 
   chess.reset();
+  resetAnalysis();
 
   // If White is engine and Black is human, orient board for Black
   const whiteConfig = getPlayerConfig('white');
@@ -764,6 +873,7 @@ function loadGameString(input) {
   chess = candidate;
   editMode = false;
   selectedPiece = null;
+  resetAnalysis();
   editorPanel.classList.add('hidden');
   btnEditBoard.textContent = 'Edit Board';
 
@@ -832,7 +942,8 @@ function init() {
   btnFlip.addEventListener('click', () => {
     ground.toggleOrientation();
     updatePlayerLabels();
-    updateEvalBar({ type: 'cp', value: 0 }, chess.turn());
+    const currentAnalysis = positionAnalyses.get(chess.history().length)?.data;
+    updateEvalBar(currentAnalysis?.eval || { type: 'cp', value: 0 }, currentAnalysis?.turn || chess.turn());
   });
   btnUndo.addEventListener('click', undoMove);
   btnEval.addEventListener('click', requestEvalOnly);
