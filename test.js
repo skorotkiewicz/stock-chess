@@ -122,7 +122,7 @@ try {
   assert(typeof moveData2.bestmove === 'string' && moveData2.bestmove.length >= 4, 'bestmove should be UCI notation');
   console.log(`✓ Stockfish 19 Black (Lv 5) move passed: ${moveData2.bestmove}`);
 
-  // 6. Test FEN and PGN parsing
+  // 7. Test FEN and PGN parsing
   const { Chess } = await import('chess.js');
   const testChess = new Chess();
   testChess.move('e4');
@@ -139,7 +139,7 @@ try {
   assert.strictEqual(importedFenChess.fen(), exportedFen, 'FEN import should match exported FEN');
   console.log('✓ PGN and FEN import/export logic verified');
 
-  // 7. Test Stockfish Eval
+  // 8. Test Stockfish Eval
   const evalRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/eval`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
