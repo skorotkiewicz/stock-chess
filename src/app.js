@@ -85,6 +85,7 @@ const boardEl = document.getElementById('board');
 const statusBox = document.getElementById('statusBox');
 const historyBody = document.getElementById('historyBody');
 const historyContainer = document.getElementById('historyContainer');
+const toggleHistoryAnalysis = document.getElementById('toggleHistoryAnalysis');
 const analysisPanel = document.getElementById('analysisPanel');
 const toggleAnalysis = document.getElementById('toggleAnalysis');
 const analysisEmpty = document.getElementById('analysisEmpty');
@@ -947,6 +948,9 @@ function init() {
   btnEval.addEventListener('click', requestEvalOnly);
   toggleAnalysis.addEventListener('change', () => {
     analysisPanel.classList.toggle('hidden', !toggleAnalysis.checked);
+  });
+  toggleHistoryAnalysis.addEventListener('change', () => {
+    historyContainer.classList.toggle('hide-move-analysis', !toggleHistoryAnalysis.checked);
   });
   btnEditBoard.addEventListener('click', toggleEditMode);
   btnEditorDone.addEventListener('click', toggleEditMode);

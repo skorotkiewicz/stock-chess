@@ -352,6 +352,10 @@ button.primary:hover {
   color: var(--text-muted);
 }
 
+.hide-move-analysis .move-meta {
+  display: none;
+}
+
 .move-quality.best,
 .move-quality.excellent {
   color: #4ade80;
