@@ -4,10 +4,10 @@ import type { HistoryCell } from './lib/store';
 import { ChessStore, PIECE_SYMBOLS, initialSnapshot } from './lib/store';
 
 const PROMOTIONS = [
-  { piece: 'q', symbol: '♕', title: 'Queen' },
-  { piece: 'r', symbol: '♖', title: 'Rook' },
-  { piece: 'b', symbol: '♗', title: 'Bishop' },
-  { piece: 'n', symbol: '♘', title: 'Knight' },
+  { piece: 'q', whiteSymbol: '♕', blackSymbol: '♛', title: 'Queen' },
+  { piece: 'r', whiteSymbol: '♖', blackSymbol: '♜', title: 'Rook' },
+  { piece: 'b', whiteSymbol: '♗', blackSymbol: '♝', title: 'Bishop' },
+  { piece: 'n', whiteSymbol: '♘', blackSymbol: '♞', title: 'Knight' },
 ];
 
 const PALETTE = ['white', 'black'].flatMap((color) =>
@@ -60,7 +60,10 @@ export function App() @{
 
   useEffect(() => {
     const el = boardRef.current as HTMLDivElement | null;
-    if (el) store.attachBoard(el);
+    if (el) {
+      store.attachBoard(el);
+      return () => store.destroy();
+    }
   }, []);
 
   useEffect(() => {
@@ -112,7 +115,7 @@ export function App() @{
                   <div class="promotion-choices">
                     @for (const p of PROMOTIONS; key p.piece) {
                       <button class="promotion-choice" title={p.title} onClick={() => store.choosePromotion(p.piece)}>
-                        {p.symbol}
+                        {ui.promotion!.orig[1] === '7' ? p.whiteSymbol : p.blackSymbol}
                       </button>
                     }
                   </div>
@@ -127,10 +130,10 @@ export function App() @{
                   if (e.target === e.currentTarget) store.closeIo();
                 }}
               >
-                <div class="modal-dialog">
+                <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="ioDialogTitle">
                   <div class="modal-header">
-                    <h3>Import / Export Game</h3>
-                    <button class="btn-close" onClick={() => store.closeIo()}>
+                    <h3 id="ioDialogTitle">Import / Export Game</h3>
+                    <button class="btn-close" aria-label="Close import and export dialog" onClick={() => store.closeIo()}>
                       ×
                     </button>
                   </div>
@@ -138,6 +141,8 @@ export function App() @{
                     Paste a FEN position or PGN notation to import, or copy current game notation.
                   </p>
                   <textarea
+                    id="ioTextarea"
+                    aria-label="FEN or PGN"
                     rows={6}
                     value={ui.ioText}
                     onInput={(e) => store.setIoText(e.currentTarget.value)}

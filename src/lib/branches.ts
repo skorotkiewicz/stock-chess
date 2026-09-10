@@ -9,6 +9,8 @@ export interface Branch {
   analysis: Map<number, { data: any; fen: string }>;
 }
 
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
 export class BranchState {
   rootFen: string;
   headers: Record<string, string>;
@@ -26,6 +28,10 @@ export class BranchState {
       White: 'White', Black: 'Black', Result: '*',
       ...headers,
     };
+    if (this.rootFen !== START_FEN && !this.headers.FEN) {
+      this.headers.SetUp = this.headers.SetUp ?? '1';
+      this.headers.FEN = this.rootFen;
+    }
     this.items = [{
       id: 'main', name: 'Main', parentId: null, forkPly: 0,
       moves: [...moves], analysis: new Map(),
@@ -164,7 +170,9 @@ export class BranchState {
       if (!order.includes(key) && value) headerLines.push(`[${key} "${value}"]`);
     }
 
-    return `${headerLines.join('\n')}\n\n${body.join(' ') || '*'}`;
+    const termination = this.headers.Result || '*';
+    const movetext = body.length ? `${body.join(' ')} ${termination}` : termination;
+    return `${headerLines.join('\n')}\n\n${movetext}`;
   }
 }
 

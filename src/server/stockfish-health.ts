@@ -1,5 +1,9 @@
 import { engine } from './engine.ts';
 
 export function stockfishHealth(): Response {
-	return Response.json({ status: 'ok', engine: 'Stockfish 19', ready: engine.isReady });
+	const ready = engine.isReady;
+	return Response.json(
+		{ status: ready ? 'ok' : 'starting', engine: 'Stockfish 19', ready },
+		{ status: ready ? 200 : 503 },
+	);
 }

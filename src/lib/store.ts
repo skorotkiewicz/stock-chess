@@ -168,6 +168,9 @@ export class ChessStore {
   pendingPromotion: { orig: string; dest: string } | null = null;
   engineTimer: ReturnType<typeof setTimeout> | null = null;
   engineAbortController: AbortController | null = null;
+  evalAbortController: AbortController | null = null;
+  boardAbortController: AbortController | null = null;
+  ioTimer: ReturnType<typeof setTimeout> | null = null;
   editMode = false;
   selectedPiece: { color: 'white' | 'black'; role: string } | null = null;
   analysisGeneration = 0;
@@ -430,6 +433,10 @@ export class ChessStore {
   // ----- board -----
 
   attachBoard(el: HTMLElement) {
+    this.detachBoard();
+    const controller = new AbortController();
+    this.boardAbortController = controller;
+
     this.ground = Chessground(el, {
       fen: this.chess.fen(),
       orientation: 'white',
@@ -452,11 +459,41 @@ export class ChessStore {
     });
 
     // Palette piece placement: intercept mousedown/touchstart in capture phase
-    el.addEventListener('mousedown', (e) => this.onBoardPlace(e), true);
-    el.addEventListener('touchstart', (e) => this.onBoardPlace(e), true);
+    const onPlace = (e: MouseEvent | TouchEvent) => this.onBoardPlace(e);
+    el.addEventListener('mousedown', onPlace, { capture: true, signal: controller.signal });
+    el.addEventListener('touchstart', onPlace, { capture: true, signal: controller.signal });
 
     this.emit();
     this.requestEvalOnly();
+  }
+
+  detachBoard() {
+    if (this.boardAbortController) {
+      this.boardAbortController.abort();
+      this.boardAbortController = null;
+    }
+    if (this.ground) {
+      this.ground.destroy();
+      this.ground = null;
+    }
+  }
+
+  destroy() {
+    this.cancelEngineMove();
+    this.cancelEval();
+    if (this.quickFlashTimer) {
+      clearTimeout(this.quickFlashTimer);
+      this.quickFlashTimer = null;
+    }
+    if (this.ioTimer) {
+      clearTimeout(this.ioTimer);
+      this.ioTimer = null;
+    }
+    this.detachBoard();
+    if (this.audio.ctx) {
+      this.audio.ctx.close().catch(() => {});
+      this.audio.ctx = null;
+    }
   }
 
   updateBoard() {
@@ -697,8 +734,19 @@ export class ChessStore {
     }
   }
 
+  cancelEval() {
+    if (this.evalAbortController) {
+      this.evalAbortController.abort();
+      this.evalAbortController = null;
+    }
+  }
+
   async requestEvalOnly() {
     if (this.isEngineThinking || this.editMode || !this.ground) return;
+    this.cancelEval();
+    const controller = new AbortController();
+    this.evalAbortController = controller;
+
     const fen = this.chess.fen();
     const ply = this.chess.history().length;
     const generation = this.analysisGeneration;
@@ -707,13 +755,19 @@ export class ChessStore {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fen }),
+        signal: controller.signal,
       });
       const data = await this.parseEngineResponse(res);
+      if (controller !== this.evalAbortController) return;
+      this.evalAbortController = null;
       if (this.editMode || generation !== this.analysisGeneration || fen !== this.chess.fen() || ply !== this.chess.history().length) return;
       if (data.eval) this.updateEvalBar(data.eval, data.turn);
       this.currentAnalyses().set(ply, { data, fen });
       this.emit();
     } catch (err) {
+      if (controller !== this.evalAbortController) return;
+      this.evalAbortController = null;
+      if ((err as Error).name === 'AbortError') return;
       console.error('Eval request failed:', err);
       if (!this.editMode && generation === this.analysisGeneration && fen === this.chess.fen()) {
         this.showEngineError(err as Error);
@@ -917,10 +971,16 @@ export class ChessStore {
 
   async copyToClipboard(text: string, successMsg: string) {
     try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard API unavailable');
+      }
       await navigator.clipboard.writeText(text);
       this.ioFeedback = { text: successMsg, error: false };
-    } catch {
-      this.ioFeedback = { text: successMsg, error: false };
+    } catch (err) {
+      this.ioFeedback = {
+        text: `Copy failed: ${(err as Error).message || 'clipboard unavailable'}`,
+        error: true,
+      };
     }
     this.emit();
   }
@@ -950,16 +1010,22 @@ export class ChessStore {
 
   async quickExportFen() {
     try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
       await navigator.clipboard.writeText(this.chess.fen());
-    } catch {}
-    this.flashStatus('FEN copied to clipboard!');
+      this.flashStatus('FEN copied to clipboard!');
+    } catch {
+      this.flashStatus('Failed to copy FEN');
+    }
   }
 
   async quickExportPgn() {
     try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
       await navigator.clipboard.writeText(this.activeBranchPgn() || this.chess.fen());
-    } catch {}
-    this.flashStatus('PGN copied to clipboard!');
+      this.flashStatus('PGN copied to clipboard!');
+    } catch {
+      this.flashStatus('Failed to copy PGN');
+    }
   }
 
   flashStatus(text: string) {
@@ -1005,7 +1071,9 @@ export class ChessStore {
         this.requestEvalOnly();
 
         this.ioFeedback = { text: 'Game successfully loaded!', error: false };
-        setTimeout(() => {
+        if (this.ioTimer) clearTimeout(this.ioTimer);
+        this.ioTimer = setTimeout(() => {
+          this.ioTimer = null;
           this.closeIo();
           this.checkEngineTurn();
         }, 600);
@@ -1037,7 +1105,9 @@ export class ChessStore {
     this.requestEvalOnly();
 
     this.ioFeedback = { text: 'Game successfully loaded!', error: false };
-    setTimeout(() => {
+    if (this.ioTimer) clearTimeout(this.ioTimer);
+    this.ioTimer = setTimeout(() => {
+      this.ioTimer = null;
       this.closeIo();
       this.checkEngineTurn();
     }, 600);

@@ -4,12 +4,23 @@ import { resolve } from 'node:path';
 
 // ponytail: binary path resolved from CWD candidates (my-app or repo root).
 // Set STOCKFISH_PATH when running from another working directory.
-const STOCKFISH_NAME = 'stockfish-linux-x86-64-universal';
+const CANDIDATE_NAMES = [
+	process.platform === 'win32' ? 'stockfish.exe' : 'stockfish',
+	'stockfish-linux-x86-64-universal',
+	'stockfish-linux-arm64-universal',
+	'stockfish-macos-universal',
+	'stockfish-windows-x86-64-universal.exe',
+	'stockfish-windows-arm64-universal.exe',
+];
+
 const STOCKFISH_PATH =
 	process.env.STOCKFISH_PATH ??
-	[resolve(process.cwd(), 'stockfish', STOCKFISH_NAME), resolve(process.cwd(), STOCKFISH_NAME), resolve(process.cwd(), '../stockfish', STOCKFISH_NAME)]
-		.find((candidate) => existsSync(candidate)) ??
-	resolve(process.cwd(), STOCKFISH_NAME);
+	CANDIDATE_NAMES.flatMap((name) => [
+		resolve(process.cwd(), 'stockfish', name),
+		resolve(process.cwd(), name),
+		resolve(process.cwd(), '../stockfish', name),
+	]).find((candidate) => existsSync(candidate)) ??
+	resolve(process.cwd(), 'stockfish', CANDIDATE_NAMES[0]);
 
 if (!existsSync(STOCKFISH_PATH)) {
 	throw new Error(`Stockfish binary not found at: ${STOCKFISH_PATH}`);
