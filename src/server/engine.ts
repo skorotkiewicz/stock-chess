@@ -1,16 +1,24 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+const isExecutableFile = (candidate: string) => {
+	try {
+		return statSync(candidate).isFile();
+	} catch {
+		return false;
+	}
+};
 
 // ponytail: binary path resolved from CWD candidates (my-app or repo root).
 // Set STOCKFISH_PATH when running from another working directory.
 const CANDIDATE_NAMES = [
-	process.platform === 'win32' ? 'stockfish.exe' : 'stockfish',
 	'stockfish-linux-x86-64-universal',
 	'stockfish-linux-arm64-universal',
 	'stockfish-macos-universal',
 	'stockfish-windows-x86-64-universal.exe',
 	'stockfish-windows-arm64-universal.exe',
+	process.platform === 'win32' ? 'stockfish.exe' : 'stockfish',
 ];
 
 const STOCKFISH_PATH =
@@ -19,10 +27,10 @@ const STOCKFISH_PATH =
 		resolve(process.cwd(), 'stockfish', name),
 		resolve(process.cwd(), name),
 		resolve(process.cwd(), '../stockfish', name),
-	]).find((candidate) => existsSync(candidate)) ??
+	]).find((candidate) => isExecutableFile(candidate)) ??
 	resolve(process.cwd(), 'stockfish', CANDIDATE_NAMES[0]);
 
-if (!existsSync(STOCKFISH_PATH)) {
+if (!isExecutableFile(STOCKFISH_PATH)) {
 	throw new Error(`Stockfish binary not found at: ${STOCKFISH_PATH}`);
 }
 
@@ -92,6 +100,17 @@ class StockfishController {
 		this.process.stdout!.on('data', (chunk: Buffer) => {
 			this.stdoutBuffer += chunk.toString();
 			this.handleOutput();
+		});
+
+		this.process.on('error', (err) => {
+			console.error('Stockfish process error:', err);
+			this.isReady = false;
+			if (this.currentTask) {
+				const task = this.currentTask;
+				this.currentTask = null;
+				this.busy = false;
+				task.reject(err);
+			}
 		});
 
 		this.process.on('close', (code: number | null) => {

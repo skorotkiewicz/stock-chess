@@ -1,6 +1,6 @@
 // Downloads the Stockfish binary into stockfish/ if it is missing.
 // Runs on `npm run stockfish` (and via postinstall).
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -60,8 +60,16 @@ export async function downloadStockfish() {
   const targetBin = resolve('stockfish', target.binName);
   const genericBin = resolve('stockfish', genericName);
 
-  if (existsSync(targetBin) || existsSync(genericBin)) {
-    console.log(`Stockfish already present at ${existsSync(targetBin) ? targetBin : genericBin}`);
+  const isFile = (p) => {
+    try {
+      return statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+
+  if (isFile(targetBin) || isFile(genericBin)) {
+    console.log(`Stockfish already present at ${isFile(targetBin) ? targetBin : genericBin}`);
     return;
   }
 
