@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsrx-tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsrx-tsc --noEmit -p tsconfig.json",
+    "stockfish": "node scripts/download-stockfish.mjs",
+    "postinstall": "node scripts/download-stockfish.mjs"
   },
   "dependencies": {
     "@octanejs/vite-plugin": "^0.1.54",
