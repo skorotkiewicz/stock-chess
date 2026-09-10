@@ -499,6 +499,16 @@ button.primary:hover {
   line-height: 1.2;
 }
 
+.editor-piece-btn[data-color="white"] {
+  color: #f8fafc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+.editor-piece-btn[data-color="black"] {
+  color: #1e293b;
+  text-shadow: 0 0 2px rgba(248, 250, 252, 0.8), 0 0 1px rgba(248, 250, 252, 0.9);
+}
+
 .editor-piece-btn.active {
   border-color: #4ade80;
   background-color: rgba(21, 128, 61, 0.25);
