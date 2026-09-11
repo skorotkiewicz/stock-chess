@@ -103,7 +103,8 @@ const escapedHeaders = parseVariationPgn(String.raw`[Event "A\"B\\C"]
 1. e4 *`);
 assert.strictEqual(escapedHeaders.headers.Event, 'A"B\\C');
 assert(escapedHeaders.toPgn().includes(String.raw`[Event "A\"B\\C"]`));
-const pgnExamples = [...readFileSync('pgn.md', 'utf8').matchAll(/```pgn\n([\s\S]*?)```/g)];
+const pgnPath = existsSync('assets/pgn.md') ? 'assets/pgn.md' : 'pgn.md';
+const pgnExamples = [...readFileSync(pgnPath, 'utf8').matchAll(/```pgn\n([\s\S]*?)```/g)];
 const branchExample = parseVariationPgn(pgnExamples.at(-1)[1]);
 assert.strictEqual(branchExample.items.length, 4, 'Bundled branch example should contain four branches');
 assert.strictEqual(parseVariationPgn(branchExample.toPgn()).items.length, 4, 'Bundled branches should round-trip');

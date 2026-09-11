@@ -20,7 +20,7 @@ Confirm that `node` is available:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ~/stock-chess/stock-chess.service ~/.config/systemd/user/
+cp ~/stock-chess/assets/stock-chess.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now stock-chess.service
 ```
@@ -37,7 +37,7 @@ Open `http://<computer-ip>:3000` from another computer on the network.
 ## Apply service-file changes
 
 ```bash
-cp ~/stock-chess/stock-chess.service ~/.config/systemd/user/
+cp ~/stock-chess/assets/stock-chess.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user restart stock-chess.service
 ```

@@ -3,7 +3,7 @@
 A web chess game built with Lichess [Chessground](https://github.com/lichess-org/chessground) and native [Stockfish 19](https://github.com/official-stockfish/Stockfish) UCI engine.
 
 <p align="center">
-  <img src="screenshot-editor.png" alt="Stockfish 19 Chess Screenshot" width="80%">
+  <img src="assets/screenshot-editor.png" alt="Stockfish 19 Chess Screenshot" width="80%">
 </p>
 
 ## Quick Start
@@ -45,3 +45,14 @@ A web chess game built with Lichess [Chessground](https://github.com/lichess-org
 
 The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to allow network access.
 Set `STOCKFISH_PATH` to use another Stockfish binary or an unsupported platform.
+
+## systemd user service
+
+Place the project at `~/stock-chess`, then install and start the user service:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ~/stock-chess/assets/stock-chess.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now stock-chess.service
+```
