@@ -55,3 +55,16 @@ cp ~/stock-chess/assets/stock-chess.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now stock-chess.service
 ```
+
+Check status and logs:
+
+```bash
+systemctl --user status stock-chess.service
+journalctl --user -u stock-chess.service -f
+```
+
+Stop and disable:
+
+```bash
+systemctl --user disable --now stock-chess.service
+```
