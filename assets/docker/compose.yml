@@ -1,5 +1,7 @@
 services:
   stock-chess:
+    container_name: stock-chess
+    image: stock-chess
     build:
       context: ../..
       dockerfile: assets/docker/Dockerfile
