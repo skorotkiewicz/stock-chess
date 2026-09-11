@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { buildEditorFen } from './src/editor-position.js';
 import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './src/analysis.js';
 import { BranchState, parseVariationPgn } from './src/branches.js';
@@ -84,12 +85,28 @@ assert(parsedBranches, 'Variation PGN should parse');
 assert.strictEqual(parsedBranches.items[1].forkPly, 1, 'Black variation should attach after White move');
 assert.deepStrictEqual(parsedBranches.items[1].moves, ['e2e4', 'c7c5']);
 assert.match(parsedBranches.toPgn(), /1\. e4 e5 \(1\.\.\. c5\) 2\. Nf3 \*$/);
+assert.strictEqual(
+  parseVariationPgn('1. e4 definitely-not-a-move *'),
+  null,
+  'Invalid PGN must not be silently truncated',
+);
 
 const customFen = '8/8/8/8/8/8/4K3/6k1 w - - 0 1';
 const customPosition = new BranchState(customFen);
 assert.match(customPosition.toPgn(), /\[SetUp "1"\]/);
 assert.match(customPosition.toPgn(), new RegExp(`\\[FEN "${customFen}"\\]`));
 assert.match(customPosition.toPgn(), /\n\n\*$/);
+const blackToMove = new BranchState('8/8/8/8/8/8/4K3/6k1 b - - 0 12', ['g1g2']);
+assert.match(blackToMove.toPgn(), /\n\n12\.\.\. Kg2 \*$/);
+const escapedHeaders = parseVariationPgn(String.raw`[Event "A\"B\\C"]
+
+1. e4 *`);
+assert.strictEqual(escapedHeaders.headers.Event, 'A"B\\C');
+assert(escapedHeaders.toPgn().includes(String.raw`[Event "A\"B\\C"]`));
+const pgnExamples = [...readFileSync('pgn.md', 'utf8').matchAll(/```pgn\n([\s\S]*?)```/g)];
+const branchExample = parseVariationPgn(pgnExamples.at(-1)[1]);
+assert.strictEqual(branchExample.items.length, 4, 'Bundled branch example should contain four branches');
+assert.strictEqual(parseVariationPgn(branchExample.toPgn()).items.length, 4, 'Bundled branches should round-trip');
 console.log('✓ Move history branches and variation PGN verified');
 
 const linuxTarget = getStockfishTarget('linux', 'x64');
@@ -103,16 +120,22 @@ assert(existsSync('public/bundle.js'), 'public/bundle.js must exist');
 assert(statSync('public/bundle.js').size > 10000, 'public/bundle.js must not be empty');
 assert(existsSync('public/style.css'), 'public/style.css must exist');
 assert(statSync('public/style.css').size > 5000, 'public/style.css must not be empty');
-assert(existsSync('stockfish/stockfish-linux-x86-64-universal'), 'Stockfish binary must exist');
-assert(statSync('stockfish/stockfish-linux-x86-64-universal').size > 1000000, 'Stockfish binary must be valid');
+const currentTarget = getStockfishTarget();
+const genericBinary = process.platform === 'win32' ? 'stockfish/stockfish.exe' : 'stockfish/stockfish';
+const stockfishBinary = [
+  process.env.STOCKFISH_PATH,
+  currentTarget && `stockfish/${currentTarget.binName}`,
+  genericBinary,
+].filter(Boolean).find(existsSync);
+assert(stockfishBinary, `Stockfish binary must exist for ${process.platform}-${process.arch}`);
+assert(statSync(stockfishBinary).size > 1000000, 'Stockfish binary must be valid');
 console.log('✓ Build artifacts and Stockfish binary verified');
 
-// 2. Start server on test port 3456
-const TEST_PORT = 3456;
+// 2. Start server on an available local port
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const serverProcess = spawn('node', ['server.js'], {
-  env: { ...process.env, PORT: String(TEST_PORT) },
-  stdio: ['pipe', 'pipe', 'inherit'],
+  env: { ...process.env, HOST: '127.0.0.1', PORT: '0' },
+  stdio: ['ignore', 'pipe', 'inherit'],
 });
 
 function cleanup() {
@@ -123,12 +146,29 @@ process.on('exit', cleanup);
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 
-// Wait for server to be ready
-await new Promise((resolve) => setTimeout(resolve, 800));
+const TEST_PORT = await new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error('Server did not start')), 10000);
+  serverProcess.once('error', reject);
+  serverProcess.stdout.setEncoding('utf8');
+  serverProcess.stdout.on('data', (output) => {
+    const match = output.match(/127\.0\.0\.1:(\d+)/);
+    if (!match) return;
+    clearTimeout(timeout);
+    resolve(Number(match[1]));
+  });
+});
+const baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+
+for (let attempts = 0; attempts < 100; attempts += 1) {
+  const response = await fetch(`${baseUrl}/api/stockfish/health`).catch(() => null);
+  if (response?.ok) break;
+  if (attempts === 99) throw new Error('Stockfish did not become ready');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
 
 try {
   // 3. Test static assets
-  const htmlRes = await fetch(`http://localhost:${TEST_PORT}/`);
+  const htmlRes = await fetch(`${baseUrl}/`);
   assert.strictEqual(htmlRes.status, 200, 'Index HTML should return 200');
   const htmlText = await htmlRes.text();
   assert(htmlText.includes('Stockfish 19 Chess'), 'Index HTML should contain title');
@@ -136,16 +176,28 @@ try {
   assert(htmlText.includes('id="branchSelect"'), 'Index HTML should contain branch selector');
   console.log('✓ Static HTML served correctly');
 
-  const jsRes = await fetch(`http://localhost:${TEST_PORT}/bundle.js`);
+  const jsRes = await fetch(`${baseUrl}/bundle.js`);
   assert.strictEqual(jsRes.status, 200, 'bundle.js should return 200');
   console.log('✓ Client JS bundle served correctly');
 
-  const cssRes = await fetch(`http://localhost:${TEST_PORT}/style.css`);
+  const cssRes = await fetch(`${baseUrl}/style.css`);
   assert.strictEqual(cssRes.status, 200, 'style.css should return 200');
   console.log('✓ CSS stylesheet served correctly');
 
+  const malformedHostResponse = await new Promise((resolve, reject) => {
+    const socket = createConnection(TEST_PORT, '127.0.0.1');
+    let response = '';
+    socket.setEncoding('utf8');
+    socket.on('connect', () => socket.write('GET / HTTP/1.1\r\nHost: [\r\nConnection: close\r\n\r\n'));
+    socket.on('data', (chunk) => { response += chunk; });
+    socket.on('error', reject);
+    socket.on('close', () => resolve(response));
+  });
+  assert.match(malformedHostResponse, /^HTTP\/1\.1 200 /, 'Malformed Host header must not crash the server');
+  console.log('✓ Malformed Host header handled safely');
+
   // 4. Test Stockfish Health
-  const healthRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/health`);
+  const healthRes = await fetch(`${baseUrl}/api/stockfish/health`);
   assert.strictEqual(healthRes.status, 200, 'Health check should return 200');
   const healthData = await healthRes.json();
   assert.strictEqual(healthData.status, 'ok', 'Health status should be ok');
@@ -154,7 +206,7 @@ try {
 
   // 5. Test Stockfish error reporting and recovery
   const unsupportedFen = 'rQbqkbnr/pppppppp/8/8/8/8/PPPPPPqP/RNBQKBNR w KQkq - 0 1';
-  const errorRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+  const errorRes = await fetch(`${baseUrl}/api/stockfish/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: unsupportedFen, level: 1 }),
@@ -168,7 +220,7 @@ try {
   );
   console.log('✓ Stockfish error reporting passed');
 
-  const injectedFenRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+  const injectedFenRes = await fetch(`${baseUrl}/api/stockfish/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: `${START_FEN}\nquit`, level: 1 }),
@@ -177,9 +229,18 @@ try {
   assert.match((await injectedFenRes.json()).error, /newline/);
   console.log('✓ FEN input validation passed');
 
+  const oversizedRes = await fetch(`${baseUrl}/api/stockfish/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: 'x'.repeat(1_000_001) }),
+  });
+  assert.strictEqual(oversizedRes.status, 413, 'Oversized payload should return 413');
+  assert.strictEqual((await oversizedRes.json()).error, 'Payload too large');
+  console.log('✓ Oversized payload rejected with HTTP 413');
+
   // 6. Test Stockfish Move generation for White (Level 1) and Black (Level 5)
   const startFen = START_FEN;
-  const moveRes1 = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+  const moveRes1 = await fetch(`${baseUrl}/api/stockfish/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: startFen, level: 1 }),
@@ -190,7 +251,7 @@ try {
   console.log(`✓ Stockfish 19 White (Lv 1) move passed: ${moveData1.bestmove}`);
 
   const blackTurnFen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
-  const moveRes2 = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+  const moveRes2 = await fetch(`${baseUrl}/api/stockfish/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: blackTurnFen, level: 5 }),
@@ -218,7 +279,7 @@ try {
   console.log('✓ PGN and FEN import/export logic verified');
 
   // 8. Test Stockfish Eval
-  const evalRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/eval`, {
+  const evalRes = await fetch(`${baseUrl}/api/stockfish/eval`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fen: startFen }),

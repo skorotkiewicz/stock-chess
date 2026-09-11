@@ -4,9 +4,11 @@ import { existsSync, createReadStream, statSync } from 'node:fs';
 import { Chess } from 'chess.js';
 import { join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getStockfishTarget } from './scripts/download-stockfish.mjs';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '127.0.0.1';
 
 function isFile(path) {
   try {
@@ -29,14 +31,7 @@ export function canonicalizeFen(rawFen) {
   }
 }
 
-const STOCKFISH_NAME = {
-  'linux-x64': 'stockfish-linux-x86-64-universal',
-  'linux-arm64': 'stockfish-linux-arm64-universal',
-  'darwin-x64': 'stockfish-macos-universal',
-  'darwin-arm64': 'stockfish-macos-universal',
-  'win32-x64': 'stockfish-windows-x86-64-universal.exe',
-  'win32-arm64': 'stockfish-windows-arm64-universal.exe',
-}[`${process.platform}-${process.arch}`];
+const STOCKFISH_NAME = getStockfishTarget()?.binName;
 const STOCKFISH_NAMES = [
   STOCKFISH_NAME,
   process.platform === 'win32' ? 'stockfish.exe' : 'stockfish',
@@ -252,7 +247,7 @@ class StockfishController {
   }
 
   evaluate(fen, { depth = 10, movetime = 300, signal } = {}) {
-    return this.query(fen, { level: 3, depth, movetime, multipv: 3, signal });
+    return this.query(fen, { level: 5, depth, movetime, multipv: 3, signal });
   }
 
   processNext() {
@@ -314,14 +309,22 @@ const engine = new StockfishController(STOCKFISH_PATH);
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
+    let bytes = 0;
+    let tooLarge = false;
     req.on('data', (chunk) => {
-      body += chunk;
-      if (body.length > 1e6) {
-        req.destroy();
-        reject(new Error('Payload too large'));
+      if (tooLarge) return;
+      bytes += chunk.length;
+      if (bytes > 1e6) {
+        tooLarge = true;
+        const error = new Error('Payload too large');
+        error.statusCode = 413;
+        reject(error);
+        return;
       }
+      body += chunk;
     });
     req.on('end', () => {
+      if (tooLarge) return;
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch (err) {
@@ -342,6 +345,7 @@ function requestSignal(req, res) {
 }
 
 function engineErrorStatus(err) {
+  if (err.statusCode) return err.statusCode;
   if (err.name === 'AbortError') return 499;
   if (err instanceof SyntaxError || /FEN|fen|newline/.test(err.message)) return 400;
   if (err.message.includes('queue is full')) return 503;
@@ -362,8 +366,14 @@ const MIME_TYPES = {
 
 // HTTP Server
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname;
+  let pathname;
+  try {
+    pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain' });
+    res.end('Bad Request');
+    return;
+  }
 
   // Stockfish Best Move API
   if (req.method === 'POST' && pathname === '/api/stockfish/move') {
@@ -447,6 +457,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-server.listen(PORT, () => {
-  console.log(`Stockfish 19 Chess game running at http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  const address = server.address();
+  console.log(`Stockfish 19 Chess game running at http://${HOST}:${address.port}`);
 });

@@ -54,5 +54,5 @@ A hilarious modern grandmaster tournament game. Both players played King to e2/e
 [Black "Black"]
 [Result "*"]
 
-1. d4 e6 2. e3 c5 (3. e4 d5 (4. dxc5 Nc6) 4. exd5 Nf6) (3. f4 d5) 3. c3 d5
+1. d4 e6 2. e3 c5 3. c3 (3. e4 d5 4. exd5 (4. dxc5 Nc6) Nf6) (3. f4 d5) d5
 ```

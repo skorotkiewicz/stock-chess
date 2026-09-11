@@ -2,7 +2,7 @@ import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
 import { buildEditorFen } from './editor-position.js';
 import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './analysis.js';
-import { BranchState, parseVariationPgn } from './branches.js';
+import { BranchState, describePly, parseVariationPgn } from './branches.js';
 
 // Game state
 let chess = new Chess();
@@ -478,13 +478,23 @@ function updateMoveHistory() {
     return td;
   }
 
-  for (let i = 0; i < history.length; i += 2) {
+  function appendRow(number, whiteMove, whitePly, blackMove, blackPly) {
     const tr = document.createElement('tr');
     const moveNum = document.createElement('td');
     moveNum.className = 'move-num';
-    moveNum.textContent = `${Math.floor(i / 2) + 1}.`;
-    tr.append(moveNum, moveCell(history[i], i), moveCell(history[i + 1], i + 1));
+    moveNum.textContent = `${number}.`;
+    tr.append(moveNum, moveCell(whiteMove, whitePly), moveCell(blackMove, blackPly));
     historyBody.appendChild(tr);
+  }
+
+  let ply = 0;
+  const first = describePly(branches.rootFen, 0);
+  if (first.color === 'black') {
+    appendRow(first.number, null, -1, history[0], 0);
+    ply = 1;
+  }
+  for (; ply < history.length; ply += 2) {
+    appendRow(describePly(branches.rootFen, ply).number, history[ply], ply, history[ply + 1], ply + 1);
   }
   const active = historyBody.querySelector('.move-ply.active');
   if (active) {
@@ -1121,7 +1131,10 @@ function init() {
   btnEditBoard.addEventListener('click', toggleEditMode);
   btnEditorDone.addEventListener('click', toggleEditMode);
   btnEditorClear.addEventListener('click', () => ground.set({ fen: '8/8/8/8/8/8/8/8' }));
-  btnEditorStart.addEventListener('click', () => ground.set({ fen: 'start' }));
+  btnEditorStart.addEventListener('click', () => {
+    chess.reset();
+    ground.set({ fen: 'start' });
+  });
   buildEditorPalette();
 
   // Modal & I/O

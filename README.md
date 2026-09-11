@@ -37,10 +37,11 @@ A web chess game built with Lichess [Chessground](https://github.com/lichess-org
 
 ## Available Scripts
 
-- `npm start`: Starts the web server at port 3000 (auto-builds if bundle is missing).
+- `npm run start`: Starts the web server at port 3000 (auto-builds if bundle is missing).
 - `npm run build`: Bundles client assets with esbuild and downloads the pinned Stockfish 19 binary if missing.
-- `npm test`: Runs integration tests for the app, server, and engine.
+- `npm run test`: Runs integration tests for the app, server, and engine.
 - `npm run stockfish`: Downloads Stockfish 19 if it is missing.
 - `npm run download:stockfish`: Downloads and verifies a fresh Stockfish 19 binary for the current platform.
 
+The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to allow network access.
 Set `STOCKFISH_PATH` to use another Stockfish binary or an unsupported platform.

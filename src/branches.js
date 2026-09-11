@@ -2,6 +2,20 @@ import { Chess } from 'chess.js';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
+export function describePly(rootFen, ply) {
+  const fields = rootFen.split(' ');
+  const offset = fields[1] === 'b' ? 1 : 0;
+  const absolutePly = ply + offset;
+  return {
+    color: absolutePly % 2 === 0 ? 'white' : 'black',
+    number: Number(fields[5]) + Math.floor(absolutePly / 2),
+  };
+}
+
+function escapeHeader(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ');
+}
+
 export class BranchState {
   constructor(rootFen, moves = [], headers = {}) {
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
@@ -118,8 +132,8 @@ export class BranchState {
 
     const emit = (branch, sans, startPly, out) => {
       for (let i = startPly; i < branch.moves.length && i < sans.length; i++) {
-        const number = Math.floor(i / 2) + 1;
-        if (i % 2 === 0) out.push(`${number}. ${sans[i]}`);
+        const { color, number } = describePly(this.rootFen, i);
+        if (color === 'white') out.push(`${number}. ${sans[i]}`);
         else if (i === startPly) out.push(`${number}... ${sans[i]}`);
         else out.push(sans[i]);
 
@@ -137,10 +151,10 @@ export class BranchState {
     const headerLines = [];
     const order = ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result'];
     for (const key of order) {
-      if (this.headers[key]) headerLines.push(`[${key} "${this.headers[key]}"]`);
+      if (this.headers[key]) headerLines.push(`[${key} "${escapeHeader(this.headers[key])}"]`);
     }
     for (const [key, value] of Object.entries(this.headers)) {
-      if (!order.includes(key) && value) headerLines.push(`[${key} "${value}"]`);
+      if (!order.includes(key) && value) headerLines.push(`[${key} "${escapeHeader(value)}"]`);
     }
 
     const result = this.headers.Result || '*';
@@ -158,7 +172,7 @@ function replayUcis(rootFen, sans, prefix = []) {
         promotion: uci.slice(4, 5) || undefined,
       });
     } catch {
-      break;
+      return null;
     }
   }
 
@@ -166,10 +180,10 @@ function replayUcis(rootFen, sans, prefix = []) {
   for (const san of sans) {
     try {
       const move = game.move(san);
-      if (!move) break;
+      if (!move) return null;
       ucis.push(`${move.from}${move.to}${move.promotion || ''}`);
     } catch {
-      break;
+      return null;
     }
   }
   return ucis;
@@ -178,7 +192,7 @@ function replayUcis(rootFen, sans, prefix = []) {
 export function parseVariationPgn(pgn) {
   const headers = {};
   let movetext = pgn.replace(/\[\s*(\w+)\s+"((?:[^"\\]|\\.)*)"\s*\]/g, (_match, key, value) => {
-    headers[key] = value.replace(/\\"/g, '"');
+    headers[key] = value.replace(/\\(["\\])/g, '$1');
     return ' ';
   });
   movetext = movetext
@@ -194,7 +208,7 @@ export function parseVariationPgn(pgn) {
   try {
     rootFen = headers.FEN ? new Chess(headers.FEN).fen() : new Chess().fen();
   } catch {
-    rootFen = new Chess().fen();
+    return null;
   }
 
   const root = { san: [], variations: [] };
@@ -206,29 +220,31 @@ export function parseVariationPgn(pgn) {
     if (token === '(') {
       stack.push({ line: { san: [], variations: [] }, atPly: Math.max(0, frame.ply - 1), ply: 0 });
     } else if (token === ')') {
-      if (stack.length > 1) {
-        const finished = stack.pop();
-        stack.at(-1).line.variations.push({ atPly: finished.atPly, line: finished.line });
-      }
+      if (stack.length === 1) return null;
+      const finished = stack.pop();
+      if (!finished.line.san.length) return null;
+      stack.at(-1).line.variations.push({ atPly: finished.atPly, line: finished.line });
     } else if (token === '*' || /^(1-0|0-1|1\/2-1\/2)$/.test(token)) {
       continue;
     } else {
       const san = token.replace(/^\d+\.+/, '').replace(/[?!]+$/, '');
-      if (/[a-zA-Z]/.test(san)) {
+      if (san && !/^\.+$/.test(san)) {
         frame.line.san.push(san);
         frame.ply += 1;
       }
     }
   }
 
-  if (!root.san.length && !root.variations.length) return null;
+  if (stack.length !== 1 || !root.san.length) return null;
   const mainUcis = replayUcis(rootFen, root.san);
-  if (!mainUcis.length && !root.variations.length) return null;
+  if (!mainUcis?.length) return null;
 
   const branches = new BranchState(rootFen, mainUcis, headers);
   const addVariation = (parentId, atPly, line) => {
     const source = branches.items.find((branch) => branch.id === parentId);
+    if (!source || !line.san.length) return false;
     const ucis = replayUcis(rootFen, line.san, source.moves.slice(0, atPly));
+    if (!ucis?.length) return false;
     let attach = source;
     while (attach.parentId !== null && atPly <= attach.forkPly) {
       attach = branches.items.find((branch) => branch.id === attach.parentId);
@@ -244,12 +260,13 @@ export function parseVariationPgn(pgn) {
       analysis: new Map(),
     });
     for (const variation of line.variations) {
-      addVariation(id, atPly + variation.atPly, variation.line);
+      if (!addVariation(id, atPly + variation.atPly, variation.line)) return false;
     }
+    return true;
   };
 
   for (const variation of root.variations) {
-    addVariation('main', variation.atPly, variation.line);
+    if (!addVariation('main', variation.atPly, variation.line)) return null;
   }
   return branches;
 }
