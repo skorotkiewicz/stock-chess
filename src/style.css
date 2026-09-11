@@ -64,6 +64,23 @@ header {
   font-weight: 600;
 }
 
+.repo-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--text-muted);
+  opacity: 0.7;
+  transition: opacity 0.2s, color 0.2s;
+}
+
+.repo-link:hover {
+  opacity: 1;
+  color: var(--text-main);
+}
+
 .main-container {
   flex: 1;
   display: flex;
