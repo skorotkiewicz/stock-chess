@@ -39,3 +39,7 @@ See [QUICK_START.md](QUICK_START.md) for all scripts, Docker, and systemd instru
 - An evaluation bar shows the advantage in centipawns or moves to mate.
 - Load games as FEN or PGN. The parser keeps PGN variations. You can copy the notation or download a `.pgn` file.
 - Move and capture sounds. The Web Audio API makes the audio.
+
+## License
+
+GPL-3.0-or-later. Stockfish and Chessground are also GPL-3.0.
