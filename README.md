@@ -25,6 +25,8 @@ A web chess game built with Lichess [Chessground](https://github.com/lichess-org
 
 4. Open `http://localhost:3000` in your browser.
 
+See [QUICK_START.md](QUICK_START.md) for full scripts, Docker, and systemd instructions.
+
 ## Features
 
 - **Lichess Chessground Board**: Smooth piece movement, legal destination highlights, and SVG piece set.
@@ -34,25 +36,3 @@ A web chess game built with Lichess [Chessground](https://github.com/lichess-org
 - **Live Evaluation Bar**: Displays position advantage in centipawns or mate distance.
 - **Import and export**: Load FEN or PGN, preserve PGN variations, copy notation, or download `.pgn` files.
 - **Sound Effects**: Move and capture audio synthesized with the Web Audio API.
-
-## Available Scripts
-
-- `npm run start`: Starts the web server at port 3000 (auto-builds if bundle is missing).
-- `npm run build`: Bundles client assets with esbuild and downloads the pinned Stockfish 19 binary if missing.
-- `npm run test`: Runs integration tests for the app, server, and engine.
-- `npm run stockfish`: Downloads Stockfish 19 if it is missing.
-- `npm run download:stockfish`: Downloads and verifies a fresh Stockfish 19 binary for the current platform.
-
-The server binds to `127.0.0.1` by default. Set `HOST=0.0.0.0` to allow network access.
-Set `STOCKFISH_PATH` to use another Stockfish binary or an unsupported platform.
-
-## systemd user service
-
-Place the project at `~/stock-chess`, then install and start the user service:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp ~/stock-chess/assets/stock-chess.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now stock-chess.service
-```
