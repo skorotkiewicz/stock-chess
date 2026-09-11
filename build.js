@@ -10,6 +10,7 @@ if (!existsSync('public')) {
   mkdirSync('public', { recursive: true });
 }
 copyFileSync('src/index.html', 'public/index.html');
+copyFileSync('src/favicon.svg', 'public/favicon.svg');
 // Cache-bust asset URLs so browsers never reuse a stale bundle
 const cacheBust = Date.now();
 let indexHtml = readFileSync('public/index.html', 'utf8');

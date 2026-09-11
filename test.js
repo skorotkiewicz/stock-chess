@@ -185,6 +185,10 @@ try {
   assert.strictEqual(cssRes.status, 200, 'style.css should return 200');
   console.log('✓ CSS stylesheet served correctly');
 
+  const favRes = await fetch(`${baseUrl}/favicon.svg`);
+  assert.strictEqual(favRes.status, 200, 'favicon.svg should return 200');
+  console.log('✓ Favicon served correctly');
+
   const malformedHostResponse = await new Promise((resolve, reject) => {
     const socket = createConnection(TEST_PORT, '127.0.0.1');
     let response = '';
