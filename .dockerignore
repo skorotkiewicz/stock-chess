@@ -5,5 +5,3 @@ stockfish
 assets
 *.md
 test.js
-package-lock.json
-bun.lock*
