@@ -1,12 +1,51 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { existsSync, createReadStream, statSync } from 'node:fs';
+import { Chess } from 'chess.js';
 import { join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const STOCKFISH_PATH = resolve(__dirname, 'stockfish/stockfish-linux-x86-64-universal');
+
+function isFile(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function canonicalizeFen(rawFen) {
+  if (typeof rawFen !== 'string' || !rawFen.trim()) {
+    throw new TypeError('Invalid or missing FEN string');
+  }
+  const fen = rawFen.trim();
+  if (/[\r\n]/.test(fen)) throw new Error('FEN must not contain newline characters');
+  try {
+    return new Chess(fen).fen();
+  } catch {
+    throw new Error('Invalid FEN notation');
+  }
+}
+
+const STOCKFISH_NAME = {
+  'linux-x64': 'stockfish-linux-x86-64-universal',
+  'linux-arm64': 'stockfish-linux-arm64-universal',
+  'darwin-x64': 'stockfish-macos-universal',
+  'darwin-arm64': 'stockfish-macos-universal',
+  'win32-x64': 'stockfish-windows-x86-64-universal.exe',
+  'win32-arm64': 'stockfish-windows-arm64-universal.exe',
+}[`${process.platform}-${process.arch}`];
+const STOCKFISH_NAMES = [
+  STOCKFISH_NAME,
+  process.platform === 'win32' ? 'stockfish.exe' : 'stockfish',
+].filter(Boolean);
+const STOCKFISH_PATH = process.env.STOCKFISH_PATH ||
+  STOCKFISH_NAMES.map((name) => resolve(__dirname, 'stockfish', name)).find(isFile) ||
+  resolve(__dirname, 'stockfish', STOCKFISH_NAMES[0] || 'stockfish');
+const MAX_QUEUE_SIZE = 16;
+const DEFAULT_TASK_TIMEOUT_MS = 10000;
 
 // Ensure frontend assets are built
 if (!existsSync(join(__dirname, 'public/bundle.js')) || !existsSync(join(__dirname, 'public/index.html'))) {
@@ -15,7 +54,7 @@ if (!existsSync(join(__dirname, 'public/bundle.js')) || !existsSync(join(__dirna
 }
 
 // Verify Stockfish binary exists
-if (!existsSync(STOCKFISH_PATH)) {
+if (!isFile(STOCKFISH_PATH)) {
   console.error(`Stockfish binary not found at: ${STOCKFISH_PATH}`);
   process.exit(1);
 }
@@ -46,22 +85,27 @@ class StockfishController {
   startProcess() {
     this.stdoutBuffer = '';
     this.isReady = false;
-    this.process = spawn(this.binaryPath, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+    const child = spawn(this.binaryPath, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+    this.process = child;
 
-    this.process.stdout.on('data', (chunk) => {
+    child.stdout.on('data', (chunk) => {
       this.stdoutBuffer += chunk.toString();
       this.handleOutput();
     });
 
-    this.process.on('close', (code) => {
+    child.on('error', (err) => {
+      console.error('Stockfish process error:', err);
+      this.isReady = false;
+      if (this.currentTask) this.rejectCurrentTask(err);
+    });
+
+    child.on('close', (code) => {
       console.log(`Stockfish process exited with code ${code}`);
+      if (this.process === child) this.process = null;
       if (this.currentTask) {
-        const task = this.currentTask;
-        this.currentTask = null;
-        this.busy = false;
-        task.reject(new Error(task.error || 'Stockfish process terminated unexpectedly'));
+        this.rejectCurrentTask(new Error(this.currentTask.error || 'Stockfish process terminated unexpectedly'));
       }
-      if (!this.destroying) {
+      if (!this.destroying && this.queue.length > 0) {
         console.log('Restarting Stockfish process');
         this.startProcess();
         this.processNext();
@@ -70,6 +114,16 @@ class StockfishController {
 
     this.send('uci');
     this.send('isready');
+  }
+
+  rejectCurrentTask(error) {
+    const task = this.currentTask;
+    if (!task) return;
+    if (task.timeoutTimer) clearTimeout(task.timeoutTimer);
+    if (task.signal && task.abortHandler) task.signal.removeEventListener('abort', task.abortHandler);
+    this.currentTask = null;
+    this.busy = false;
+    task.reject(error);
   }
 
   send(command) {
@@ -124,19 +178,27 @@ class StockfishController {
           const ponder = parts[3] || null;
           const task = this.currentTask;
 
+          if (task.timeoutTimer) clearTimeout(task.timeoutTimer);
+          if (task.signal && task.abortHandler) task.signal.removeEventListener('abort', task.abortHandler);
           this.currentTask = null;
           this.busy = false;
 
-          const lines = [...task.lines.values()].sort((a, b) => a.multipv - b.multipv);
-          const analysis = lines.find((item) => item.multipv === 1) || null;
-          task.resolve({
-            bestmove,
-            ponder,
-            turn: task.fen.split(' ')[1],
-            eval: analysis?.score || { type: 'cp', value: 0 },
-            analysis,
-            lines,
-          });
+          if (task.signal?.aborted) {
+            const error = new Error('Request aborted');
+            error.name = 'AbortError';
+            task.reject(error);
+          } else {
+            const lines = [...task.lines.values()].sort((a, b) => a.multipv - b.multipv);
+            const analysis = lines.find((item) => item.multipv === 1) || null;
+            task.resolve({
+              bestmove,
+              ponder,
+              turn: task.fen.split(' ')[1],
+              eval: analysis?.score || { type: 'cp', value: 0 },
+              analysis,
+              lines,
+            });
+          }
 
           this.processNext();
         }
@@ -144,39 +206,80 @@ class StockfishController {
     }
   }
 
-  query(fen, { level = 3, depth, movetime, multipv = 1 } = {}) {
+  query(rawFen, { level = 3, depth, movetime, multipv = 1, signal } = {}) {
+    const fen = canonicalizeFen(rawFen);
+    if (signal?.aborted) {
+      const error = new Error('Request aborted');
+      error.name = 'AbortError';
+      return Promise.reject(error);
+    }
+    if (this.queue.length >= MAX_QUEUE_SIZE) {
+      return Promise.reject(new Error('Engine queue is full'));
+    }
+
     return new Promise((resolve, reject) => {
       const config = DIFFICULTY_LEVELS[level] || DIFFICULTY_LEVELS[3];
-      const targetDepth = depth || config.depth;
-      const targetMovetime = movetime || config.movetime;
-
-      this.queue.push({
+      const task = {
         fen,
         config,
-        depth: targetDepth,
-        movetime: targetMovetime,
+        depth: depth || config.depth,
+        movetime: movetime || config.movetime,
         multipv,
         lines: new Map(),
+        signal,
         resolve,
         reject,
-      });
+      };
 
+      if (signal) {
+        task.abortHandler = () => {
+          const index = this.queue.indexOf(task);
+          if (index !== -1) {
+            this.queue.splice(index, 1);
+            const error = new Error('Request aborted');
+            error.name = 'AbortError';
+            task.reject(error);
+          } else if (this.currentTask === task) {
+            this.send('stop');
+          }
+        };
+        signal.addEventListener('abort', task.abortHandler, { once: true });
+      }
+
+      this.queue.push(task);
       this.processNext();
     });
   }
 
-  evaluate(fen, { depth = 10, movetime = 300 } = {}) {
-    return this.query(fen, { level: 3, depth, movetime, multipv: 3 });
+  evaluate(fen, { depth = 10, movetime = 300, signal } = {}) {
+    return this.query(fen, { level: 3, depth, movetime, multipv: 3, signal });
   }
 
   processNext() {
     if (this.busy || this.queue.length === 0) return;
 
+    while (this.queue[0]?.signal?.aborted) {
+      const task = this.queue.shift();
+      const error = new Error('Request aborted');
+      error.name = 'AbortError';
+      task.reject(error);
+    }
+    if (this.queue.length === 0) return;
+    if (!this.process || this.process.exitCode !== null || this.process.killed) this.startProcess();
+
     this.busy = true;
     this.currentTask = this.queue.shift();
+    const task = this.currentTask;
+    const timeoutMs = Math.max(DEFAULT_TASK_TIMEOUT_MS, task.movetime + 5000);
+    task.timeoutTimer = setTimeout(() => {
+      if (this.currentTask !== task) return;
+      console.warn(`Engine task timed out after ${timeoutMs}ms`);
+      const child = this.process;
+      this.rejectCurrentTask(new Error('Engine task timed out'));
+      child?.kill();
+    }, timeoutMs);
 
-    const { fen, config, depth, movetime, multipv } = this.currentTask;
-
+    const { fen, config, depth, movetime, multipv } = task;
     this.send('stop');
     this.send('setoption name UCI_ShowWDL value true');
     this.send(`setoption name MultiPV value ${multipv}`);
@@ -194,9 +297,13 @@ class StockfishController {
 
   destroy() {
     this.destroying = true;
+    const error = new Error('Engine stopped');
+    if (this.currentTask) this.rejectCurrentTask(error);
+    for (const task of this.queue.splice(0)) task.reject(error);
     if (this.process) {
       this.send('quit');
       this.process.kill();
+      this.process = null;
     }
   }
 }
@@ -225,6 +332,22 @@ function readJsonBody(req) {
   });
 }
 
+function requestSignal(req, res) {
+  const controller = new AbortController();
+  req.once('aborted', () => controller.abort());
+  res.once('close', () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  return controller.signal;
+}
+
+function engineErrorStatus(err) {
+  if (err.name === 'AbortError') return 499;
+  if (err instanceof SyntaxError || /FEN|fen|newline/.test(err.message)) return 400;
+  if (err.message.includes('queue is full')) return 503;
+  return 500;
+}
+
 // MIME types
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -245,19 +368,20 @@ const server = http.createServer(async (req, res) => {
   // Stockfish Best Move API
   if (req.method === 'POST' && pathname === '/api/stockfish/move') {
     try {
+      const signal = requestSignal(req, res);
       const data = await readJsonBody(req);
-      if (!data.fen) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing fen parameter' }));
-        return;
-      }
-
-      const result = await engine.query(data.fen, { level: data.level });
+      const fen = canonicalizeFen(data.fen);
+      const level = typeof data.level === 'number' && Number.isInteger(data.level)
+        ? Math.max(1, Math.min(5, data.level))
+        : 3;
+      const result = await engine.query(fen, { level, signal });
+      if (res.destroyed) return;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
+      if (res.destroyed) return;
+      res.writeHead(engineErrorStatus(err), { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message || 'Internal server error' }));
     }
     return;
   }
@@ -265,27 +389,29 @@ const server = http.createServer(async (req, res) => {
   // Stockfish Position Eval API
   if (req.method === 'POST' && pathname === '/api/stockfish/eval') {
     try {
+      const signal = requestSignal(req, res);
       const data = await readJsonBody(req);
-      if (!data.fen) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Missing fen parameter' }));
-        return;
-      }
-
-      const result = await engine.evaluate(data.fen);
+      const fen = canonicalizeFen(data.fen);
+      const result = await engine.evaluate(fen, { signal });
+      if (res.destroyed) return;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
+      if (res.destroyed) return;
+      res.writeHead(engineErrorStatus(err), { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message || 'Internal server error' }));
     }
     return;
   }
 
   // Engine Health Check API
   if (req.method === 'GET' && pathname === '/api/stockfish/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', engine: 'Stockfish 19', ready: engine.isReady }));
+    res.writeHead(engine.isReady ? 200 : 503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: engine.isReady ? 'ok' : 'starting',
+      engine: 'Stockfish 19',
+      ready: engine.isReady,
+    }));
     return;
   }
 

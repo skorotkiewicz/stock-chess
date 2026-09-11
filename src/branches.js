@@ -1,8 +1,24 @@
+import { Chess } from 'chess.js';
+
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
 export class BranchState {
   constructor(rootFen, moves = [], headers = {}) {
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
     this.rootFen = rootFen;
-    this.headers = { ...headers };
-    this.items = [{ id: 'main', name: 'Main', moves: [...moves], analysis: new Map() }];
+    this.headers = {
+      Event: '?', Site: '?', Date: date, Round: '?',
+      White: 'White', Black: 'Black', Result: '*',
+      ...headers,
+    };
+    if (rootFen !== START_FEN && !this.headers.FEN) {
+      this.headers.SetUp = this.headers.SetUp ?? '1';
+      this.headers.FEN = rootFen;
+    }
+    this.items = [{
+      id: 'main', name: 'Main', parentId: null, forkPly: 0,
+      moves: [...moves], analysis: new Map(),
+    }];
     this.activeId = 'main';
     this.viewedPly = moves.length;
     this.nextVariation = 1;
@@ -52,15 +68,188 @@ export class BranchState {
     const parent = this.active;
     const forkPly = this.viewedPly;
     const number = this.nextVariation++;
+    let attach = parent;
+    while (attach.parentId !== null && forkPly <= attach.forkPly) {
+      attach = this.items.find((item) => item.id === attach.parentId);
+    }
+
     const branch = {
       id: `variation-${number}`,
       name: `Variation ${number}`,
-      moves: [...parent.moves.slice(0, forkPly), move],
-      analysis: new Map([...parent.analysis].filter(([ply]) => ply <= forkPly)),
+      parentId: attach.id,
+      forkPly,
+      moves: [...attach.moves.slice(0, forkPly), move],
+      analysis: new Map([...attach.analysis].filter(([ply]) => ply <= forkPly)),
     };
     this.items.push(branch);
     this.activeId = branch.id;
     this.viewedPly = branch.moves.length;
     return { created: true, branch, parent, forkPly };
   }
+
+  toPgn() {
+    const children = new Map();
+    for (const branch of this.items) {
+      if (branch.parentId === null) continue;
+      const key = `${branch.parentId}:${branch.forkPly}`;
+      const list = children.get(key);
+      if (list) list.push(branch);
+      else children.set(key, [branch]);
+    }
+
+    const replay = (moves) => {
+      const game = new Chess(this.rootFen);
+      const sans = [];
+      for (const uci of moves) {
+        try {
+          const move = game.move({
+            from: uci.slice(0, 2),
+            to: uci.slice(2, 4),
+            promotion: uci.slice(4, 5) || undefined,
+          });
+          if (!move) break;
+          sans.push(move.san);
+        } catch {
+          break;
+        }
+      }
+      return sans;
+    };
+
+    const emit = (branch, sans, startPly, out) => {
+      for (let i = startPly; i < branch.moves.length && i < sans.length; i++) {
+        const number = Math.floor(i / 2) + 1;
+        if (i % 2 === 0) out.push(`${number}. ${sans[i]}`);
+        else if (i === startPly) out.push(`${number}... ${sans[i]}`);
+        else out.push(sans[i]);
+
+        for (const child of children.get(`${branch.id}:${i}`) || []) {
+          const variation = [];
+          emit(child, replay(child.moves), child.forkPly, variation);
+          if (variation.length) out.push(`(${variation.join(' ')})`);
+        }
+      }
+    };
+
+    const body = [];
+    emit(this.items[0], replay(this.items[0].moves), 0, body);
+
+    const headerLines = [];
+    const order = ['Event', 'Site', 'Date', 'Round', 'White', 'Black', 'Result'];
+    for (const key of order) {
+      if (this.headers[key]) headerLines.push(`[${key} "${this.headers[key]}"]`);
+    }
+    for (const [key, value] of Object.entries(this.headers)) {
+      if (!order.includes(key) && value) headerLines.push(`[${key} "${value}"]`);
+    }
+
+    const result = this.headers.Result || '*';
+    return `${headerLines.join('\n')}\n\n${body.length ? `${body.join(' ')} ${result}` : result}`;
+  }
+}
+
+function replayUcis(rootFen, sans, prefix = []) {
+  const game = new Chess(rootFen);
+  for (const uci of prefix) {
+    try {
+      game.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci.slice(4, 5) || undefined,
+      });
+    } catch {
+      break;
+    }
+  }
+
+  const ucis = [];
+  for (const san of sans) {
+    try {
+      const move = game.move(san);
+      if (!move) break;
+      ucis.push(`${move.from}${move.to}${move.promotion || ''}`);
+    } catch {
+      break;
+    }
+  }
+  return ucis;
+}
+
+export function parseVariationPgn(pgn) {
+  const headers = {};
+  let movetext = pgn.replace(/\[\s*(\w+)\s+"((?:[^"\\]|\\.)*)"\s*\]/g, (_match, key, value) => {
+    headers[key] = value.replace(/\\"/g, '"');
+    return ' ';
+  });
+  movetext = movetext
+    .replace(/\{[^}]*\}/g, ' ')
+    .replace(/;[^\n]*/g, ' ')
+    .replace(/\$\d+/g, ' ')
+    .replace(/\(/g, ' ( ')
+    .replace(/\)/g, ' ) ')
+    .trim();
+  if (!movetext) return null;
+
+  let rootFen;
+  try {
+    rootFen = headers.FEN ? new Chess(headers.FEN).fen() : new Chess().fen();
+  } catch {
+    rootFen = new Chess().fen();
+  }
+
+  const root = { san: [], variations: [] };
+  const stack = [{ line: root, atPly: 0, ply: 0 }];
+
+  for (const token of movetext.split(/\s+/)) {
+    if (!token) continue;
+    const frame = stack.at(-1);
+    if (token === '(') {
+      stack.push({ line: { san: [], variations: [] }, atPly: Math.max(0, frame.ply - 1), ply: 0 });
+    } else if (token === ')') {
+      if (stack.length > 1) {
+        const finished = stack.pop();
+        stack.at(-1).line.variations.push({ atPly: finished.atPly, line: finished.line });
+      }
+    } else if (token === '*' || /^(1-0|0-1|1\/2-1\/2)$/.test(token)) {
+      continue;
+    } else {
+      const san = token.replace(/^\d+\.+/, '').replace(/[?!]+$/, '');
+      if (/[a-zA-Z]/.test(san)) {
+        frame.line.san.push(san);
+        frame.ply += 1;
+      }
+    }
+  }
+
+  if (!root.san.length && !root.variations.length) return null;
+  const mainUcis = replayUcis(rootFen, root.san);
+  if (!mainUcis.length && !root.variations.length) return null;
+
+  const branches = new BranchState(rootFen, mainUcis, headers);
+  const addVariation = (parentId, atPly, line) => {
+    const source = branches.items.find((branch) => branch.id === parentId);
+    const ucis = replayUcis(rootFen, line.san, source.moves.slice(0, atPly));
+    let attach = source;
+    while (attach.parentId !== null && atPly <= attach.forkPly) {
+      attach = branches.items.find((branch) => branch.id === attach.parentId);
+    }
+    const number = branches.nextVariation++;
+    const id = `variation-${number}`;
+    branches.items.push({
+      id,
+      name: `Variation ${number}`,
+      parentId: attach.id,
+      forkPly: atPly,
+      moves: [...attach.moves.slice(0, atPly), ...ucis],
+      analysis: new Map(),
+    });
+    for (const variation of line.variations) {
+      addVariation(id, atPly + variation.atPly, variation.line);
+    }
+  };
+
+  for (const variation of root.variations) {
+    addVariation('main', variation.atPly, variation.line);
+  }
+  return branches;
 }

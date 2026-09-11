@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { buildEditorFen } from './src/editor-position.js';
 import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './src/analysis.js';
-import { BranchState } from './src/branches.js';
+import { BranchState, parseVariationPgn } from './src/branches.js';
+import { getStockfishTarget } from './scripts/download-stockfish.mjs';
 
 console.log('--- Running Chess App Verification Tests ---');
 
@@ -77,7 +78,25 @@ assert.deepStrictEqual(branches.active.moves, ['e2e4'], 'Takeback should affect 
 assert.strictEqual(branches.active.analysis.has(2), false, 'Takeback should discard later analysis');
 branches.select('main');
 assert.deepStrictEqual(branches.active.moves, ['e2e4', 'e7e5'], 'Takeback should preserve sibling branches');
-console.log('✓ Move history branch creation and switching verified');
+
+const parsedBranches = parseVariationPgn('1. e4 e5 (1... c5) 2. Nf3 *');
+assert(parsedBranches, 'Variation PGN should parse');
+assert.strictEqual(parsedBranches.items[1].forkPly, 1, 'Black variation should attach after White move');
+assert.deepStrictEqual(parsedBranches.items[1].moves, ['e2e4', 'c7c5']);
+assert.match(parsedBranches.toPgn(), /1\. e4 e5 \(1\.\.\. c5\) 2\. Nf3 \*$/);
+
+const customFen = '8/8/8/8/8/8/4K3/6k1 w - - 0 1';
+const customPosition = new BranchState(customFen);
+assert.match(customPosition.toPgn(), /\[SetUp "1"\]/);
+assert.match(customPosition.toPgn(), new RegExp(`\\[FEN "${customFen}"\\]`));
+assert.match(customPosition.toPgn(), /\n\n\*$/);
+console.log('✓ Move history branches and variation PGN verified');
+
+const linuxTarget = getStockfishTarget('linux', 'x64');
+assert.strictEqual(linuxTarget.binName, 'stockfish-linux-x86-64-universal');
+assert.strictEqual(linuxTarget.sha256, '9defc0d4e55d49c65a6d042f3e571a39fcea499ade6dbe741b53b8c65e03611f');
+assert.strictEqual(getStockfishTarget('sunos', 'sparc'), null);
+console.log('✓ Pinned Stockfish download targets verified');
 
 // 1. Verify build artifacts
 assert(existsSync('public/bundle.js'), 'public/bundle.js must exist');
@@ -90,6 +109,7 @@ console.log('✓ Build artifacts and Stockfish binary verified');
 
 // 2. Start server on test port 3456
 const TEST_PORT = 3456;
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const serverProcess = spawn('node', ['server.js'], {
   env: { ...process.env, PORT: String(TEST_PORT) },
   stdio: ['pipe', 'pipe', 'inherit'],
@@ -148,8 +168,17 @@ try {
   );
   console.log('✓ Stockfish error reporting passed');
 
+  const injectedFenRes = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fen: `${START_FEN}\nquit`, level: 1 }),
+  });
+  assert.strictEqual(injectedFenRes.status, 400, 'FEN command injection should return 400');
+  assert.match((await injectedFenRes.json()).error, /newline/);
+  console.log('✓ FEN input validation passed');
+
   // 6. Test Stockfish Move generation for White (Level 1) and Black (Level 5)
-  const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  const startFen = START_FEN;
   const moveRes1 = await fetch(`http://localhost:${TEST_PORT}/api/stockfish/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

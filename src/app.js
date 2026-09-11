@@ -2,7 +2,7 @@ import { Chessground } from 'chessground';
 import { Chess } from 'chess.js';
 import { buildEditorFen } from './editor-position.js';
 import { classifyMove, formatAnalysisScore, formatWhiteWdl, uciLineToSan } from './analysis.js';
-import { BranchState } from './branches.js';
+import { BranchState, parseVariationPgn } from './branches.js';
 
 // Game state
 let chess = new Chess();
@@ -13,6 +13,9 @@ let isMatchPaused = false;
 let pendingPromotion = null;
 let engineTimer = null;
 let engineAbortController = null;
+let evalAbortController = null;
+let ioTimer = null;
+let statusTimer = null;
 let editMode = false;
 let selectedPiece = null;
 let analysisGeneration = 0;
@@ -20,6 +23,10 @@ let analysisGeneration = 0;
 const PIECE_SYMBOLS = {
   'w king': '♔', 'w queen': '♕', 'w rook': '♖', 'w bishop': '♗', 'w knight': '♘', 'w pawn': '♙',
   'b king': '♚', 'b queen': '♛', 'b rook': '♜', 'b bishop': '♝', 'b knight': '♞', 'b pawn': '♟',
+};
+const PROMOTION_SYMBOLS = {
+  w: { q: '♕', r: '♖', b: '♗', n: '♘' },
+  b: { q: '♛', r: '♜', b: '♝', n: '♞' },
 };
 
 // Sound synthesizer using Web Audio API
@@ -201,7 +208,7 @@ function rebuildChess() {
 }
 
 function activeBranchPgn() {
-  return buildBranchChess(branches.active.moves.length).pgn();
+  return branches.toPgn();
 }
 
 function resetBranchesFromGame(game) {
@@ -273,6 +280,7 @@ function setAnalysisMessage(message) {
 }
 
 function resetAnalysis(message = 'Analyzing position...') {
+  cancelEval();
   analysisGeneration += 1;
   currentAnalyses().clear();
   setAnalysisMessage(message);
@@ -478,7 +486,12 @@ function updateMoveHistory() {
     tr.append(moveNum, moveCell(history[i], i), moveCell(history[i + 1], i + 1));
     historyBody.appendChild(tr);
   }
-  historyBody.querySelector('.move-ply.active')?.scrollIntoView({ block: 'nearest' });
+  const active = historyBody.querySelector('.move-ply.active');
+  if (active) {
+    const box = historyContainer.getBoundingClientRect();
+    const cell = active.getBoundingClientRect();
+    historyContainer.scrollTop += cell.top - box.top - (historyContainer.clientHeight - cell.height) / 2;
+  }
 }
 
 function showBranchPosition() {
@@ -528,6 +541,11 @@ function cancelEngineMove() {
   isEngineThinking = false;
 }
 
+function cancelEval() {
+  if (evalAbortController) evalAbortController.abort();
+  evalAbortController = null;
+}
+
 function checkEngineTurn() {
   if (editMode || branches.isReviewing || isEngineThinking || isMatchPaused || chess.isGameOver()) return;
   const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
@@ -552,6 +570,10 @@ function checkEngineTurn() {
 // Handle promotion piece selection
 function handlePromotion(orig, dest) {
   pendingPromotion = { orig, dest };
+  const color = chess.get(orig)?.color || 'w';
+  promotionChoices.querySelectorAll('.promotion-choice').forEach((button) => {
+    button.textContent = PROMOTION_SYMBOLS[color][button.dataset.piece];
+  });
   promotionOverlay.classList.remove('hidden');
 }
 
@@ -637,6 +659,7 @@ function showEngineError(err) {
 // Request Stockfish move from backend API
 async function requestEngineMove(level) {
   if (isEngineThinking || isMatchPaused || chess.isGameOver()) return;
+  cancelEval();
   const controller = new AbortController();
   engineAbortController = controller;
   isEngineThinking = true;
@@ -708,6 +731,9 @@ async function requestEngineMove(level) {
 // Request position evaluation only
 async function requestEvalOnly() {
   if (isEngineThinking || editMode) return;
+  cancelEval();
+  const controller = new AbortController();
+  evalAbortController = controller;
   const fen = chess.fen();
   const ply = chess.history().length;
   const generation = analysisGeneration;
@@ -716,12 +742,18 @@ async function requestEvalOnly() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fen }),
+      signal: controller.signal,
     });
     const data = await parseEngineResponse(res);
+    if (controller !== evalAbortController) return;
+    evalAbortController = null;
     if (editMode || generation !== analysisGeneration || fen !== chess.fen() || ply !== chess.history().length) return;
     if (data.eval) updateEvalBar(data.eval, data.turn);
     storePositionAnalysis(ply, data, fen, true);
   } catch (err) {
+    if (controller !== evalAbortController) return;
+    evalAbortController = null;
+    if (err.name === 'AbortError') return;
     console.error('Eval request failed:', err);
     if (!editMode && generation === analysisGeneration && fen === chess.fen()) showEngineError(err);
   }
@@ -911,16 +943,20 @@ function closeIoModal() {
   ioModalOverlay.classList.add('hidden');
 }
 
-function copyToClipboard(text, successMsg) {
-  navigator.clipboard.writeText(text).then(() => {
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  ioTextarea.value = text;
+  ioTextarea.select();
+  if (!document.execCommand('copy')) throw new Error('Clipboard API unavailable');
+}
+
+async function copyToClipboard(text, successMsg) {
+  try {
+    await writeClipboard(text);
     showFeedback(successMsg);
-  }).catch(() => {
-    // Fallback using textarea select
-    ioTextarea.value = text;
-    ioTextarea.select();
-    document.execCommand('copy');
-    showFeedback(successMsg);
-  });
+  } catch (err) {
+    showFeedback(`Copy failed: ${err.message || 'clipboard unavailable'}`, true);
+  }
 }
 
 function downloadPgnFile() {
@@ -953,7 +989,35 @@ function loadGameString(input) {
     success = true;
   } catch {}
 
-  // Try PGN format
+  // Preserve PGN variations when present.
+  if (!success) {
+    const parsed = parseVariationPgn(trimmed);
+    if (parsed) {
+      cancelEngineMove();
+      branches = parsed;
+      rebuildChess();
+      editMode = false;
+      selectedPiece = null;
+      resetAnalysis();
+      editorPanel.classList.add('hidden');
+      btnEditBoard.textContent = 'Edit Board';
+      updateBranchControls();
+      updateBoard();
+      updateMoveHistory();
+      updateGameStatus();
+      requestEvalOnly();
+      showFeedback('Game successfully loaded!');
+      if (ioTimer) clearTimeout(ioTimer);
+      ioTimer = setTimeout(() => {
+        ioTimer = null;
+        closeIoModal();
+        checkEngineTurn();
+      }, 600);
+      return;
+    }
+  }
+
+  // Fall back to chess.js plain-PGN parsing.
   if (!success) {
     try {
       candidate.loadPgn(trimmed);
@@ -980,7 +1044,9 @@ function loadGameString(input) {
   requestEvalOnly();
 
   showFeedback('Game successfully loaded!');
-  setTimeout(() => {
+  if (ioTimer) clearTimeout(ioTimer);
+  ioTimer = setTimeout(() => {
+    ioTimer = null;
     closeIoModal();
     checkEngineTurn();
   }, 600);
@@ -1071,23 +1137,39 @@ function init() {
   btnDownloadPgn.addEventListener('click', downloadPgnFile);
 
   // Quick export buttons in sidebar
-  btnQuickExportFen.addEventListener('click', () => {
-    navigator.clipboard.writeText(chess.fen());
-    statusBox.textContent = 'FEN copied to clipboard!';
-    setTimeout(updateGameStatus, 1500);
-  });
+  async function quickExport(text, label) {
+    try {
+      await writeClipboard(text);
+      statusBox.textContent = `${label} copied to clipboard!`;
+    } catch {
+      statusBox.textContent = `Failed to copy ${label}`;
+    }
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      statusTimer = null;
+      updateGameStatus();
+    }, 1500);
+  }
 
-  btnQuickExportPgn.addEventListener('click', () => {
-    navigator.clipboard.writeText(activeBranchPgn() || chess.fen());
-    statusBox.textContent = 'PGN copied to clipboard!';
-    setTimeout(updateGameStatus, 1500);
-  });
+  btnQuickExportFen.addEventListener('click', () => quickExport(chess.fen(), 'FEN'));
+  btnQuickExportPgn.addEventListener('click', () => quickExport(activeBranchPgn() || chess.fen(), 'PGN'));
 
   // Initial state
   updateBranchControls();
   updatePlayerLabels();
   updateGameStatus();
   requestEvalOnly();
+
+  window.addEventListener('pagehide', () => {
+    cancelEngineMove();
+    cancelEval();
+    if (ioTimer) clearTimeout(ioTimer);
+    if (statusTimer) clearTimeout(statusTimer);
+    boardEl.removeEventListener('mousedown', onBoardPlace, true);
+    boardEl.removeEventListener('touchstart', onBoardPlace, true);
+    ground.destroy();
+    audio.ctx?.close().catch(() => {});
+  }, { once: true });
 }
 
 // Start application
