@@ -39,11 +39,13 @@ const STOCKFISH_NAMES = [
 const STOCKFISH_PATH = process.env.STOCKFISH_PATH ||
   STOCKFISH_NAMES.map((name) => resolve(__dirname, 'stockfish', name)).find(isFile) ||
   resolve(__dirname, 'stockfish', STOCKFISH_NAMES[0] || 'stockfish');
-const MAX_QUEUE_SIZE = 16;
-const DEFAULT_TASK_TIMEOUT_MS = 10000;
+const MAX_QUEUE_SIZE = parseInt(process.env.MAX_QUEUE_SIZE || '16', 10);
+const DEFAULT_TASK_TIMEOUT_MS = parseInt(process.env.DEFAULT_TASK_TIMEOUT_MS || '10000', 10);
+const MAX_QUEUE_TIMEOUT = parseInt(process.env.MAX_QUEUE_TIMEOUT_MS || '30000', 10);
 
-// Ensure frontend assets are built
-if (!existsSync(join(__dirname, 'public/bundle.js')) || !existsSync(join(__dirname, 'public/index.html'))) {
+// Ensure frontend assets are built in dev mode
+if (process.env.NODE_ENV !== 'production' &&
+    (!existsSync(join(__dirname, 'public/bundle.js')) || !existsSync(join(__dirname, 'public/index.html')))) {
   const { execSync } = await import('node:child_process');
   execSync('node build.js', { stdio: 'inherit' });
 }
@@ -265,7 +267,7 @@ class StockfishController {
     this.busy = true;
     this.currentTask = this.queue.shift();
     const task = this.currentTask;
-    const timeoutMs = Math.max(DEFAULT_TASK_TIMEOUT_MS, task.movetime + 5000);
+    const timeoutMs = Math.min(MAX_QUEUE_TIMEOUT, Math.max(DEFAULT_TASK_TIMEOUT_MS, task.movetime + 5000));
     task.timeoutTimer = setTimeout(() => {
       if (this.currentTask !== task) return;
       console.warn(`Engine task timed out after ${timeoutMs}ms`);
@@ -447,15 +449,16 @@ const server = http.createServer(async (req, res) => {
 });
 
 // Graceful cleanup
-process.on('SIGINT', () => {
+function gracefulExit() {
   engine.destroy();
-  process.exit(0);
-});
+  server.close(() => {
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(0), 5000).unref();
+}
 
-process.on('SIGTERM', () => {
-  engine.destroy();
-  process.exit(0);
-});
+process.on('SIGINT', gracefulExit);
+process.on('SIGTERM', gracefulExit);
 
 server.listen(PORT, HOST, () => {
   const address = server.address();

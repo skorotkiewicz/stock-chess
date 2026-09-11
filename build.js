@@ -26,7 +26,7 @@ await esbuild.build({
   outfile: 'public/bundle.js',
   format: 'esm',
   minify: true,
-  sourcemap: true,
+  sourcemap: process.env.NODE_ENV !== 'production',
 });
 
 // 4. Build CSS bundle
