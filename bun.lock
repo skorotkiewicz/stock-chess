@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "my-app",
+      "name": "stock-chess-octane",
       "dependencies": {
         "@octanejs/vite-plugin": "^0.1.54",
         "chess.js": "^1.4.0",

@@ -1,6 +1,6 @@
 // Downloads the Stockfish binary into stockfish/ if it is missing.
 // Runs on `npm run stockfish` (and via postinstall).
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -68,7 +68,8 @@ export async function downloadStockfish() {
     }
   };
 
-  if (isFile(targetBin) || isFile(genericBin)) {
+  const force = process.argv.includes('--force');
+  if (!force && (isFile(targetBin) || isFile(genericBin))) {
     console.log(`Stockfish already present at ${isFile(targetBin) ? targetBin : genericBin}`);
     return;
   }
@@ -87,62 +88,32 @@ export async function downloadStockfish() {
     );
   }
 
-  const tmp = resolve('stockfish.tmp');
   const archivePath = resolve('stockfish.archive.tmp');
   writeFileSync(archivePath, data);
-  mkdirSync(tmp, { recursive: true });
 
   try {
+    const projectRoot = resolve('.');
     if (target.archive.endsWith('.tar.gz')) {
-      execFileSync('tar', ['-xzf', archivePath, '-C', tmp], { stdio: 'inherit' });
+      execFileSync('tar', ['-xzf', archivePath, '-C', projectRoot], { stdio: 'inherit' });
     } else if (process.platform === 'win32') {
       try {
-        execFileSync('tar', ['-xf', archivePath, '-C', tmp], { stdio: 'inherit' });
+        execFileSync('tar', ['-xf', archivePath, '-C', projectRoot], { stdio: 'inherit' });
       } catch {
         execFileSync(
           'powershell',
-          ['-NoProfile', '-Command', `Expand-Archive -Path '${archivePath}' -DestinationPath '${tmp}' -Force`],
+          ['-NoProfile', '-Command', `Expand-Archive -Path '${archivePath}' -DestinationPath '${projectRoot}' -Force`],
           { stdio: 'inherit' },
         );
       }
     } else {
-      execFileSync('unzip', ['-q', archivePath, '-d', tmp], { stdio: 'inherit' });
+      execFileSync('unzip', ['-q', archivePath, '-d', projectRoot], { stdio: 'inherit' });
     }
 
-    const findBinary = (dir) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = resolve(dir, entry.name);
-        if (entry.isDirectory()) {
-          const found = findBinary(full);
-          if (found) return found;
-        } else if (entry.name === target.binName || (entry.name.startsWith('stockfish') && !entry.name.endsWith('.tmp'))) {
-          return full;
-        }
-      }
-      return null;
-    };
-
-    const binary = findBinary(tmp);
-    if (!binary) throw new Error(`${target.binName} not found inside downloaded archive`);
-
-    mkdirSync(resolve('stockfish'), { recursive: true });
-    try {
-      renameSync(binary, targetBin);
-    } catch {
-      copyFileSync(binary, targetBin);
-    }
-    if (targetBin !== genericBin) {
-      try {
-        copyFileSync(targetBin, genericBin);
-      } catch {}
-    }
-    if (process.platform !== 'win32') {
+    if (process.platform !== 'win32' && isFile(targetBin)) {
       chmodSync(targetBin, 0o755);
-      if (existsSync(genericBin)) chmodSync(genericBin, 0o755);
     }
-    console.log(`Stockfish installed at ${targetBin}`);
+    console.log(`Stockfish extracted directly to ${resolve('stockfish')}`);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
     rmSync(archivePath, { force: true });
   }
 }
